@@ -1,0 +1,7 @@
+[configuration]
+
+entry_symbol = "gdluau_library_init"
+
+[libraries]
+
+windows.debug.x86_64 = "res://addons/gdluau/bin/libgdluau.windows.template_debug.x86_64.dll"

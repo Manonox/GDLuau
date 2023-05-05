@@ -328,6 +328,7 @@ paths.append([os.path.join("luau", x, "include") for x in luau_paths])
 paths.append([os.path.join("luau", x, "src") for x in luau_paths])
 
 env_lua.Append(CPPPATH=paths)
+env_lua.Append(CCFLAGS = ["-g"])
 
 library_name = "gdluau{}{}".format(env['suffix'], env["LIBSUFFIX"])
 library = env_lua.StaticLibrary("bin/{}".format(library_name), source=sources)

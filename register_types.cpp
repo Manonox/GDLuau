@@ -5,7 +5,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
-//#include "src/luau_vm.h"
+#include "src/lua_vm.h"
 
 using namespace godot;
 
@@ -14,7 +14,7 @@ void initialize_gdluau_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 
-	//ClassDB::register_class<LuauVM>();
+	ClassDB::register_class<LuauVM>();
 }
 
 void uninitialize_gdluau_module(ModuleInitializationLevel p_level) {

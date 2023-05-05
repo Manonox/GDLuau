@@ -1,0 +1,30 @@
+[gd_scene load_steps=2 format=3 uid="uid://iyg4jgcck4tx"]
+
+[sub_resource type="GDScript" id="GDScript_gxxnv"]
+script/source = "extends Node
+
+
+@onready var luau_vm : LuauVM = $LuauVM
+
+func _ready():
+	get_tree().create_timer(0.5).timeout.connect(_poop)
+
+func _poop() -> void:
+	print(\"Running...\")
+	luau_vm.open_all_libraries()
+	luau_vm.do_string(\"\"\"a = {
+		\"shit\",
+		5,
+		\"poop\",
+		4,
+		
+		[7] = 34,
+	}\"\"\")
+	luau_vm.getglobal(\"a\")
+	print(\"result = \", luau_vm.tovariant(luau_vm.gettop()))
+"
+
+[node name="Main" type="Node"]
+script = SubResource("GDScript_gxxnv")
+
+[node name="LuauVM" type="LuauVM" parent="."]

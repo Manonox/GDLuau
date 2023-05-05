@@ -5,8 +5,22 @@ import fnmatch
 
 env = SConscript("extern/SConscript")
 env.tools=['mingw']
+env.Append(CCFLAGS = ["-g"])
 
-env.Append(CPPPATH = [Dir('src').abspath, Dir('extern').abspath])
+cpp_paths = [Dir('src').abspath, Dir('extern').abspath]
+luau_paths = [
+    "Common",
+    "Ast",
+    "Compiler",
+    "CodeGen",
+    "Analysis",
+    "VM",
+    "extern/isocline",
+]
+for path in luau_paths:
+    cpp_paths.append(Dir("extern/luau/" + path + "/include").abspath)
+
+env.Append(CPPPATH = cpp_paths)
 sources = Glob('*.cpp')
 sources.append(Glob('src/*.cpp'))
 sources.append(Glob('src/classes/*.cpp'))
@@ -21,7 +35,7 @@ if env["platform"] == "macos":
     )
 else:
     library = env.SharedLibrary(
-        "demo/addons/gdluau/bin/libgdluau{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+        "project/addons/gdluau/bin/libgdluau{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
         source=sources,
     )
 
