@@ -6,6 +6,7 @@
 #include <lua.h>
 #include <lualib.h>
 #include <luacode.h>
+#include <classes/luau_function.h>
 
 
 #define LUA_VECLIBNAME "vector"
@@ -44,6 +45,7 @@ public:
     Variant tovariant(int index);
     Array toarray(int index);
     Dictionary todictionary(int index);
+
 
     void luacall(int nargs, int nresults);
     void concat(int n);
@@ -98,8 +100,11 @@ public:
     int tointeger(int index);
     double tonumber(int index);
     String tostring(int index);
+    Ref<LuauFunction> tofunction(int index);
+    
     int type(int index);
     String luatypename(int type);
+
     String getupvalue(int index, int n);
     String setupvalue(int index, int n);
 };

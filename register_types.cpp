@@ -7,6 +7,7 @@
 #include <godot_cpp/godot.hpp>
 
 #include "src/luau_vm.h"
+#include "src/classes/luau_error.h"
 #include "src/classes/luau_function.h"
 
 using namespace godot;
@@ -15,8 +16,10 @@ void initialize_gdluau_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
-
+	
 	ClassDB::register_class<LuauVM>();
+	ClassDB::register_class<LuauError>();
+	ClassDB::register_class<LuauFunction>();
 }
 
 void uninitialize_gdluau_module(ModuleInitializationLevel p_level) {

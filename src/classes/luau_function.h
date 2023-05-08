@@ -22,7 +22,7 @@ public:
     LuauFunction(lua_State *L, int ref);
     ~LuauFunction();
 
-    Variant call(const Variant **args, GDExtensionInt arg_count, GDExtensionCallError &error);
+    Variant pcall(const Variant **args, GDExtensionInt arg_count, GDExtensionCallError &error);
 };
 
 }

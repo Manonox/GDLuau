@@ -63,6 +63,8 @@ void LuauVM::_bind_methods() {
     ClassDB::bind_method(D_METHOD("toarray", "index"), &LuauVM::toarray);
     ClassDB::bind_method(D_METHOD("todictionary", "index"), &LuauVM::todictionary);
 
+    ClassDB::bind_method(D_METHOD("tofunction", "index"), &LuauVM::tofunction);
+
     _bind_passthrough_methods();
 
     ADD_SIGNAL(MethodInfo("stdout", PropertyInfo(Variant::STRING, "message")));
@@ -164,6 +166,11 @@ Array LuauVM::toarray(int index) {
 Dictionary LuauVM::todictionary(int index) {
     return lua_todictionary(L, index);
 }
+
+Ref<LuauFunction> LuauVM::tofunction(int index) {
+    return lua_tofunction(L, index);
+}
+
 
 static lua_CompileOptions luau_vm_compile_options = {
     // 0 - no optimization

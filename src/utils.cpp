@@ -122,11 +122,9 @@ godot::Variant lua_tovariant(lua_State *L, int idx) {
             return lua_todictionary(L, idx);
         }
 
-        /*
         case LUA_TFUNCTION: {
-
+            return lua_tofunction(L, idx);
         }
-        */
     }
 }
 
@@ -144,13 +142,15 @@ godot::Array lua_toarray(lua_State *L, int idx) {
 
 godot::Dictionary lua_todictionary(lua_State *L, int idx) {
     godot::Dictionary dict;
+    lua_pushvalue(L, idx);
     lua_pushnil(L);
-    while (lua_next(L, idx) != 0) {
+    while (lua_next(L, -2) != 0) {
         godot::Variant key = lua_tovariant(L, -2);
         godot::Variant value = lua_tovariant(L, -1);
         dict[key] = value;
         lua_pop(L, 1);
     }
+    lua_pop(L, 1);
     return dict;
 }
 
@@ -182,4 +182,9 @@ bool luaL_isarray(lua_State *L, int idx) {
     
     lua_pop(L, 3);
     return false;
+}
+
+godot::Ref<godot::LuauFunction> lua_tofunction(lua_State *L, int idx) {
+    int ref = lua_ref(L, idx);
+    return memnew(godot::LuauFunction(L, ref));
 }

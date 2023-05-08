@@ -14,8 +14,23 @@ func _ready():
 
 		print(\"Running...\")
 		
+		luau_vm.do_string(\"\"\"
 		
+			function poop(a, b, c)
+				return {
+					c = c - 1,
+					ba = b + a,
+				}
+			end
 		
+		\"\"\")
+		
+		luau_vm.getglobal(\"poop\")
+		var poop_func := luau_vm.tofunction(-1)
+		luau_vm.pop(1)
+
+		print(poop_func.pcall(5, 3, 5.5))
+
 		print(\"Finished.\")
 		
 		)
