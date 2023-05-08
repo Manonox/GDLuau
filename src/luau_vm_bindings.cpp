@@ -1,4 +1,4 @@
-#include <lua_vm.h>
+#include <luau_vm.h>
 #include <utils.h>
 
 #include <cstdlib>
@@ -93,11 +93,11 @@ void LuauVM::getfenv(int index) {
     lua_getfenv(L, index);
 }
 
-void LuauVM::getfield(int index, String key) {
+void LuauVM::getfield(int index, const String &key) {
     lua_getfield(L, index, key.ascii().get_data()); // Returns type..?
 }
 
-void LuauVM::getglobal(String key) {
+void LuauVM::getglobal(const String &key) {
     lua_getfield(L, LUA_GLOBALSINDEX, key.ascii().get_data());
 }
 
@@ -203,7 +203,7 @@ void LuauVM::pushnumber(float x) {
     lua_pushnumber(L, x);
 }
 
-void LuauVM::pushstring(String s) {
+void LuauVM::pushstring(const String &s) {
     lua_pushstring(L, s.ascii().get_data());
 }
 
@@ -243,11 +243,11 @@ bool LuauVM::setfenv(int index) {
     return lua_setfenv(L, index);
 }
 
-void LuauVM::setfield(int index, String key) {
+void LuauVM::setfield(int index, const String &key) {
     lua_setfield(L, index, key.ascii().get_data());
 }
 
-void LuauVM::setglobal(String key) {
+void LuauVM::setglobal(const String &key) {
     lua_setglobal(L, key.ascii().get_data());
 }
 

@@ -5,7 +5,9 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
-#include "src/lua_vm.h"
+
+#include "src/luau_vm.h"
+#include "src/classes/luau_function.h"
 
 using namespace godot;
 

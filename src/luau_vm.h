@@ -7,6 +7,11 @@
 #include <lualib.h>
 #include <luacode.h>
 
+
+#define LUA_VECLIBNAME "vector"
+#define LUAUGD_REGISTRY_NODE_KEY "starscade_node"
+
+
 namespace godot {
 
 class LuauVM : public Node {
@@ -14,6 +19,7 @@ class LuauVM : public Node {
 
 private:
     lua_State* L;
+    const char *last_lua_error = nullptr;
 
 protected:
     static void _bind_methods();
@@ -22,14 +28,22 @@ protected:
 public:
     LuauVM();
     ~LuauVM();
-
-    int do_string(String s);
-    void open_libraries(Array libraries);
-    void open_all_libraries();
+    
     void register_lua_print();
 
-    void pushvariant(Variant var);
+    bool do_string(const String &code, const String &chunkname);
+    String get_lua_error();
+
+    void open_libraries(const Array &libraries);
+    void open_all_libraries();
+
+    void pushvariant(const Variant &var);
+    void pusharray(const Array &array);
+    void pushdictionary(const Dictionary &dictionary);
+
     Variant tovariant(int index);
+    Array toarray(int index);
+    Dictionary todictionary(int index);
 
     void luacall(int nargs, int nresults);
     void concat(int n);
@@ -37,8 +51,8 @@ public:
     void equal(int index1, int index2);
     void error();
     void getfenv(int index);
-    void getfield(int index, String key);
-    void getglobal(String key);
+    void getfield(int index, const String &key);
+    void getglobal(const String &key);
     bool getmetatable(int index);
     void gettable(int index);
     int gettop();
@@ -64,7 +78,7 @@ public:
     void pushboolean(bool b);
     void pushinteger(int x);
     void pushnumber(float x);
-    void pushstring(String s);
+    void pushstring(const String &s);
     void pushvalue(int index);
     bool rawequal(int index1, int index2);
     void rawget(int index);
@@ -74,8 +88,8 @@ public:
     void remove(int index);
     void replace(int index);
     bool setfenv(int index);
-    void setfield(int index, String key);
-    void setglobal(String key);
+    void setfield(int index, const String &key);
+    void setglobal(const String &key);
     bool setmetatable(int index);
     void settable(int index);
     void settop(int index);
@@ -91,5 +105,7 @@ public:
 };
 
 }
+
+int luaopen_vector(lua_State *L);
 
 #endif

@@ -1,37 +1,19 @@
 #include <lua.h>
 #include <lualib.h>
 
+#include <godot_cpp/variant/utility_functions.hpp>
+#include <godot_cpp/variant/variant.hpp>
+#include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/classes/node.hpp>
 
-static bool luaL_isarray(lua_State *L, int idx) {
-    /*
-    function is_array(tbl)
-        local first = next(tbl)
-        if type(first) ~= "number" then
-            return first == nil and true or false
-        end
-        local size = #tbl
-        local key = next(tbl, size)
-        return type(key) == "nil"
-    end
-    */
-    
-    lua_pushnil(L);
-    int has_keys = lua_next(L, idx);
-    if (!has_keys)
-        return true;
-    
-    if (lua_type(L, -2) != LUA_TNUMBER)
-        return false;
-    
-    lua_pop(L, 2);
 
-    size_t size = lua_objlen(L, idx);
-    lua_pushinteger(L, (int)size);
-    int has_more = lua_next(L, idx);
 
-    if (!has_more)
-        return true;
-    
-    lua_pop(L, 2);
-    return false;
-}
+void lua_pushvariant(lua_State *L, const godot::Variant &var);
+void lua_pusharray(lua_State *L, const godot::Array &array);
+void lua_pushdictionary(lua_State *L, const godot::Dictionary &dict);
+
+godot::Variant lua_tovariant(lua_State *L, int idx);
+godot::Array lua_toarray(lua_State *L, int idx);
+godot::Dictionary lua_todictionary(lua_State *L, int idx);
+
+bool luaL_isarray(lua_State *L, int idx);
