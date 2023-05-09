@@ -9,16 +9,16 @@ void lua_pushvariant(lua_State *L, const godot::Variant &var) {
             lua_pushnil(L);
             break;
         case godot::Variant::Type::STRING:
-            lua_pushstring(L,(var.operator godot::String()).ascii().get_data());
+            lua_pushstring(L, (var.operator godot::String()).ascii().get_data());
             break;
         case godot::Variant::Type::INT:
-            lua_pushinteger(L, (int64_t)var);
+            lua_pushinteger(L, var.operator int32_t());
             break;
         case godot::Variant::Type::FLOAT:
             lua_pushnumber(L, var.operator double());
             break;
         case godot::Variant::Type::BOOL:
-            lua_pushboolean(L, (bool)var);
+            lua_pushboolean(L, var.operator bool());
             break;
         case godot::Variant::Type::ARRAY: {
             lua_pusharray(L, var.operator godot::Array());
@@ -58,6 +58,11 @@ void lua_pushvariant(lua_State *L, const godot::Variant &var) {
             lua_pushcallable(L, c);
             break;
         }
+
+        default: {
+            lua_pushnil(L);
+            break;
+        }
     }
 }
 
@@ -69,7 +74,6 @@ void lua_pusharray(lua_State *L, const godot::Array &array) {
 
         lua_pushinteger(L, i + 1);
         lua_pushvariant(L, value);
-
         lua_rawset(L, -3);
     }
 }
@@ -77,8 +81,9 @@ void lua_pusharray(lua_State *L, const godot::Array &array) {
 void lua_pushdictionary(lua_State *L, const godot::Dictionary &dict) {
     lua_createtable(L, 0, dict.size());
 
+    auto keys = dict.keys();
     for(int i = 0; i < dict.size(); i++) {
-        godot::Variant key = dict.keys()[i];
+        godot::Variant key = keys[i];
         godot::Variant value = dict[key];
         
         lua_pushvariant(L, key);
@@ -97,7 +102,7 @@ godot::Variant lua_tovariant(lua_State *L, int idx) {
         }
 
         case LUA_TBOOLEAN: {
-            return lua_toboolean(L, idx);
+            return (bool)lua_toboolean(L, idx);
         }
 
         case LUA_TNUMBER: {
@@ -123,9 +128,11 @@ godot::Variant lua_tovariant(lua_State *L, int idx) {
         case LUA_TFUNCTION: {
             return lua_tofunction(L, idx);
         }
-    }
 
-    return godot::Variant();
+        default: {
+            return godot::Variant();
+        }
+    }
 }
 
 
@@ -202,7 +209,6 @@ static int lua_pushcallable_method(lua_State *L) {
     CallableWrapped *p_callablewrapped = (CallableWrapped *)lua_touserdata(L, lua_upvalueindex(1));
     
     if (!godot::UtilityFunctions::is_instance_id_valid(p_callablewrapped->object_id)) {
-        godot::UtilityFunctions::print("pooped :(");
         luaL_error(L, "attempt to call method on an invalid object");
         return 0;
     }
@@ -210,19 +216,20 @@ static int lua_pushcallable_method(lua_State *L) {
     godot::Object *object_p = godot::ObjectDB::get_instance(p_callablewrapped->object_id);
 
     if (!object_p->has_method(p_callablewrapped->method)) {
-        godot::UtilityFunctions::print("pooped 2 :(");
         luaL_error(L, "attempt to call invalid external method");
         return 0;
     }
 
-    godot::Array arguments;
+    godot::Array lua_arguments;
     int arg_count = lua_gettop(L);
     for (int i = 1; i <= arg_count; i++) {
         godot::Variant arg = lua_tovariant(L, i);
-        arguments.push_back(arg);
+        lua_arguments.push_back(arg);
     }
     
-    godot::Variant result = object_p->callv(p_callablewrapped->method, arguments);
+    godot::Array arguments;
+    arguments.push_back(lua_arguments);
+    godot::Variant result = object_p->callv(p_callablewrapped->method, arguments); // Work-around, can't use 'call' for some reason
     lua_pushvariant(L, result);
     return 1;
 }
