@@ -45,7 +45,9 @@ public:
     Variant tovariant(int index);
     Array toarray(int index);
     Dictionary todictionary(int index);
-
+    
+    Ref<LuauFunction> tofunction(int index);
+    Error pushcallable(const Callable &callable);
 
     void luacall(int nargs, int nresults);
     void concat(int n);
@@ -100,7 +102,6 @@ public:
     int tointeger(int index);
     double tonumber(int index);
     String tostring(int index);
-    Ref<LuauFunction> tofunction(int index);
     
     int type(int index);
     String luatypename(int type);

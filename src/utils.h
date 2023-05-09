@@ -23,5 +23,6 @@ godot::Dictionary lua_todictionary(lua_State *L, int idx);
 bool luaL_isarray(lua_State *L, int idx);
 
 godot::Ref<godot::LuauFunction> lua_tofunction(lua_State *L, int idx);
+void lua_pushcallable(lua_State *L, const godot::Callable &callable);
 
 #endif

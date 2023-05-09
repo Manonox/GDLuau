@@ -1,4 +1,5 @@
 #include <utils.h>
+#include <godot_cpp/variant/callable.hpp>
 
 
 void lua_pushvariant(lua_State *L, const godot::Variant &var) {
@@ -52,14 +53,11 @@ void lua_pushvariant(lua_State *L, const godot::Variant &var) {
             break;
         }
 
-        /*
         case godot::Variant::Type::CALLABLE: {
-            Callable c = var.operator Callable();
-            
-            lua_pushcfunction(L, callable_proxy, c.get_method());
+            godot::Callable c = var.operator godot::Callable();
+            lua_pushcallable(L, c);
             break;
         }
-        */
     }
 }
 
@@ -126,6 +124,8 @@ godot::Variant lua_tovariant(lua_State *L, int idx) {
             return lua_tofunction(L, idx);
         }
     }
+
+    return godot::Variant();
 }
 
 
@@ -187,4 +187,50 @@ bool luaL_isarray(lua_State *L, int idx) {
 godot::Ref<godot::LuauFunction> lua_tofunction(lua_State *L, int idx) {
     int ref = lua_ref(L, idx);
     return memnew(godot::LuauFunction(L, ref));
+}
+
+
+typedef struct CallableWrapped {
+    lua_State *L;
+
+    godot::Object *object_p;
+    int64_t object_id;
+    const char32_t *method;
+} CallableWrapped;
+
+static int lua_pushcallable_method(lua_State *L) {
+    CallableWrapped *p_callablewrapped = (CallableWrapped *)lua_touserdata(L, lua_upvalueindex(1));
+    
+    if (!godot::UtilityFunctions::is_instance_id_valid(p_callablewrapped->object_id)) {
+        godot::UtilityFunctions::print("pooped :(");
+        luaL_error(L, "attempt to call method on an invalid object");
+        return 0;
+    }
+
+    godot::Object *object_p = godot::ObjectDB::get_instance(p_callablewrapped->object_id);
+
+    if (!object_p->has_method(p_callablewrapped->method)) {
+        godot::UtilityFunctions::print("pooped 2 :(");
+        luaL_error(L, "attempt to call invalid external method");
+        return 0;
+    }
+
+    godot::Array arguments;
+    int arg_count = lua_gettop(L);
+    for (int i = 1; i <= arg_count; i++) {
+        godot::Variant arg = lua_tovariant(L, i);
+        arguments.push_back(arg);
+    }
+    
+    godot::Variant result = object_p->callv(p_callablewrapped->method, arguments);
+    lua_pushvariant(L, result);
+    return 1;
+}
+
+void lua_pushcallable(lua_State *L, const godot::Callable &callable) {
+    CallableWrapped *p_callablewrapped = (CallableWrapped *)lua_newuserdata(L, sizeof(CallableWrapped));
+    p_callablewrapped->L = L;
+    p_callablewrapped->object_id = callable.get_object_id();
+    p_callablewrapped->method = callable.get_method().c_escape().ptr();
+    lua_pushcclosure(L, lua_pushcallable_method, NULL, 1);
 }

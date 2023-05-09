@@ -64,6 +64,8 @@ void LuauVM::_bind_methods() {
     ClassDB::bind_method(D_METHOD("todictionary", "index"), &LuauVM::todictionary);
 
     ClassDB::bind_method(D_METHOD("tofunction", "index"), &LuauVM::tofunction);
+    ClassDB::bind_method(D_METHOD("pushcallable", "func"), &LuauVM::pushcallable);
+    ClassDB::bind_method(D_METHOD("pushfunction", "func"), &LuauVM::pushcallable);
 
     _bind_passthrough_methods();
 
@@ -169,6 +171,13 @@ Dictionary LuauVM::todictionary(int index) {
 
 Ref<LuauFunction> LuauVM::tofunction(int index) {
     return lua_tofunction(L, index);
+}
+
+Error LuauVM::pushcallable(const Callable &callable) {
+    ERR_FAIL_COND_V_MSG(callable.is_custom(), ERR_INVALID_PARAMETER, "Cannot push callable, lambda callables aren't supported.");
+    ERR_FAIL_COND_V_MSG(callable.is_null(), ERR_INVALID_PARAMETER, "Cannot push callable, the provided callable is invalid.");
+    lua_pushcallable(L, callable);
+    return OK;
 }
 
 

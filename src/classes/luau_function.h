@@ -23,6 +23,7 @@ public:
     ~LuauFunction();
 
     Variant pcall(const Variant **args, GDExtensionInt arg_count, GDExtensionCallError &error);
+    Variant pcallv(const Array &arguments);
 };
 
 }

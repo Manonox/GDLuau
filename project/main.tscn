@@ -14,27 +14,29 @@ func _ready():
 
 		print(\"Running...\")
 		
-		luau_vm.do_string(\"\"\"
-		
-			function poop(a, b, c)
-				return {
-					c = c - 1,
-					ba = b + a,
-				}
-			end
-		
-		\"\"\")
-		
-		luau_vm.getglobal(\"poop\")
-		var poop_func := luau_vm.tofunction(-1)
-		luau_vm.pop(1)
+		var funny_func := self._funny
 
-		print(poop_func.pcall(5, 3, 5.5))
+		var err := OK
+		err = luau_vm.pushcallable(funny_func)
+		if (err != OK):
+			print(\"Error!!!\")
+			return
+		luau_vm.setglobal(\"funny\")
+
+		luau_vm.do_string(\"\"\"
+			print(\"hee-hee\")
+			print(funny)
+			print(\"hee-haa\")
+			funny(\"poopin'\")
+		\"\"\")
 
 		print(\"Finished.\")
 		
 		)
 
+
+func _funny(something):
+	print(str(something) + \" is funny!\")
 
 func _on_luau_vm_stdout(message: String):
 	print(message)

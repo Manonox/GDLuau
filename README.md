@@ -14,12 +14,11 @@ Features
 --------
 - [x] Run code from String
 - [x] Push / Pull Variant
-- [x] ~~Push Callables~~ / Pull Functions
+- [x] Push Callables / Pull Functions
 
 TODO
 -----
-- [ ] Push Callables
-- [ ] More wrappers for different Variants
+- [ ] idk
 
 Compiling
 ------------
