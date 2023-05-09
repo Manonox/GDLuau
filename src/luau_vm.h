@@ -102,6 +102,8 @@ public:
     int tointeger(int index);
     double tonumber(int index);
     String tostring(int index);
+
+    void error_with_traceback(const String &message);
     
     int type(int index);
     String luatypename(int type);

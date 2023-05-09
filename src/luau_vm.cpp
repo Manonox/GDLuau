@@ -67,6 +67,8 @@ void LuauVM::_bind_methods() {
     ClassDB::bind_method(D_METHOD("pushcallable", "func"), &LuauVM::pushcallable);
     ClassDB::bind_method(D_METHOD("pushfunction", "func"), &LuauVM::pushcallable);
 
+    ClassDB::bind_method(D_METHOD("error_with_traceback", "message"), &LuauVM::error_with_traceback);
+
     _bind_passthrough_methods();
 
     ADD_SIGNAL(MethodInfo("stdout", PropertyInfo(Variant::STRING, "message")));
@@ -262,4 +264,11 @@ bool LuauVM::do_string(const String &code, const String &chunkname) {
 
 String LuauVM::get_lua_error() {
     return String(last_lua_error);
+}
+
+void LuauVM::error_with_traceback(const String &message) {
+    luaL_where(L, 1);
+    lua_pushstring(L, message.ascii().get_data()); // memory leak ..?
+    lua_concat(L, 2);
+    lua_error(L);
 }
