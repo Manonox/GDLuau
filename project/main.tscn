@@ -14,15 +14,10 @@ func _ready():
 
 		print(\"Running...\")
 		
-		var shit_library := {
-			poopin = self._funny
-		}
-
-		luau_vm.pushdictionary(shit_library)
-		luau_vm.setglobal(\"shit\")
-
-		if not luau_vm.do_string(\"print(shit.poopin(true, vector(3, 1)))\"):
+		if not luau_vm.do_string(\"return {shidder = 3}\"):
 			print(luau_vm.get_lua_error())
+			return
+		print(luau_vm.get_lua_return())
 
 		print(\"Finished.\")
 		
