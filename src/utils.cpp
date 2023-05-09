@@ -230,8 +230,18 @@ static int lua_pushcallable_method(lua_State *L) {
     godot::Array arguments;
     arguments.push_back(lua_arguments);
     godot::Variant result = object_p->callv(p_callablewrapped->method, arguments); // Work-around, can't use 'call' for some reason
-    lua_pushvariant(L, result);
-    return 1;
+
+    godot::Array results;
+    if (result.get_type() != godot::Variant::Type::ARRAY)
+        results.push_back(result);
+    else
+        results = result;
+
+    for (int64_t i = 0; i < results.size(); i++) {
+        lua_pushvariant(L, results[i]);
+    }
+
+    return results.size();
 }
 
 void lua_pushcallable(lua_State *L, const godot::Callable &callable) {
