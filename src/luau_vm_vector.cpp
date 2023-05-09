@@ -8,26 +8,27 @@
 using namespace godot;
 
 
-int lua_vector(lua_State* L) {
-    int nargs = lua_gettop(L);
+int lua_vector_lib_call(lua_State* L) {
+    int nargs = lua_gettop(L) - 1;
     if (nargs >= 4) {
         luaL_error(L, "vector4 is not supported");
         return 0;
     }
 
     if (nargs == 1) {
-        if (lua_isvector(L, 1)) { // Copy
-            auto vec = lua_tovector(L, 1);
+        if (lua_isvector(L, 2)) { // Copy
+            auto vec = lua_tovector(L, 2);
             lua_pushvector(L, vec[0], vec[1], vec[2]);
             return 1;
         }
 
-        if (lua_istable(L, 1)) { // From table
+        if (lua_istable(L, 2)) { // From table
             double v[3] {0.0, 0.0, 0.0};
 
+            lua_pushvalue(L, 2); // push table copy
             for (int i = 1; i <= 3; i++) {
-                lua_pushinteger(L, i);
-                lua_gettable(L, -1);
+                lua_pushinteger(L, i); // push component index
+                lua_gettable(L, -2); // push component
                 int isnum;
                 double x = lua_tonumberx(L, -1, &isnum);
                 if (!isnum) {
@@ -36,18 +37,19 @@ int lua_vector(lua_State* L) {
                     return 0;
                 }
                 v[i-1] = x;
-                lua_pop(L, 1);
+                lua_pop(L, 1); // pop component
             }
+            lua_pop(L, 1); // pop table copy
 
             lua_pushvector(L, float(v[0]), float(v[1]), float(v[2]));
             return 1;
         }
     } else {
-        double x = luaL_checknumber(L, 1);
-        double y = luaL_checknumber(L, 2);
+        double x = luaL_checknumber(L, 2);
+        double y = luaL_checknumber(L, 3);
         double z = 0.0;
-        if (nargs >= 3)
-            z = luaL_checknumber(L, 3);
+        if (nargs == 3)
+            z = luaL_checknumber(L, 4);
 
         lua_pushvector(L, float(x), float(y), float(z));
         return 1;
@@ -80,17 +82,23 @@ int lua_vector_index(lua_State* L) {
 }
 
 static const luaL_Reg veclib[] = {
-    {"new", lua_vector},
+    // hmm...
     {NULL, NULL},
 };
 
 int luaopen_vector(lua_State* L)
 {
     luaL_register(L, LUA_VECLIBNAME, veclib);
+    luaL_newmetatable(L, "vector_lib");
+
+    lua_pushstring(L, "__call");
+    lua_pushcfunction(L, lua_vector_lib_call, nullptr);
+    lua_rawset(L, -3);
+
+    lua_setmetatable(L, -2);
 
     lua_pushvector(L, 0.0, 0.0, 0.0);
     lua_setfield(L, -2, "zero");
-
     lua_pushvector(L, -1.0, 0.0, 0.0);
     lua_setfield(L, -2, "left");
     lua_pushvector(L, 1.0, 0.0, 0.0);
@@ -113,7 +121,7 @@ int luaopen_vector(lua_State* L)
 
     lua_pushstring(L, "__index");
     lua_pushcfunction(L, lua_vector_index, nullptr);
-    lua_settable(L, -3);
+    lua_rawset(L, -3);
 
     lua_setmetatable(L, -2);
     lua_pop(L, 1);

@@ -14,29 +14,24 @@ func _ready():
 
 		print(\"Running...\")
 		
-		var funny_func := self._funny
+		var shit_library := {
+			poopin = self._funny
+		}
 
-		var err := OK
-		err = luau_vm.pushcallable(funny_func)
-		if (err != OK):
-			print(\"Error!!!\")
-			return
-		luau_vm.setglobal(\"funny\")
+		luau_vm.pushdictionary(shit_library)
+		luau_vm.setglobal(\"shit\")
 
-		luau_vm.do_string(\"\"\"
-			print(\"hee-hee\")
-			print(funny)
-			print(\"hee-haa\")
-			funny(\"poopin'\")
-		\"\"\")
+		if not luau_vm.do_string(\"print(shit.poopin(true, vector(3, 1)))\"):
+			print(luau_vm.get_lua_error())
 
 		print(\"Finished.\")
 		
 		)
 
 
-func _funny(something):
-	print(str(something) + \" is funny!\")
+func _funny(arguments: Array):
+	print(\"input: \", arguments)
+	return Vector3(2.0, -3.3, 0.0)
 
 func _on_luau_vm_stdout(message: String):
 	print(message)

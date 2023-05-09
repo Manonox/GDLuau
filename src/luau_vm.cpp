@@ -201,9 +201,11 @@ static lua_CompileOptions luau_vm_compile_options = {
     0,
 
     // const char* vectorLib;
-    "vector",
+    nullptr,
 
     // const char* vectorCtor;
+    "vector",
+
     // const char** mutableGlobals;
 };
 
