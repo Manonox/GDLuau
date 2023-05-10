@@ -20,8 +20,6 @@ class LuauVM : public Node {
 
 private:
     lua_State* L;
-    const char *last_lua_error = nullptr;
-    Array last_lua_return;
 
 protected:
     static void _bind_methods();
@@ -33,9 +31,7 @@ public:
     
     void register_lua_print();
 
-    bool do_string(const String &code, const String &chunkname);
-    String get_lua_error();
-    Array get_lua_return();
+    int do_string(const String &code, const String &chunkname);
 
     void open_libraries(const Array &libraries);
     void open_all_libraries();

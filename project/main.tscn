@@ -14,26 +14,44 @@ func _ready():
 
 		print(\"Running...\")
 
-		luau_vm.pushcallable(self._funny)
+		luau_vm.pushcallable(self._require)
 		luau_vm.setglobal(\"require\")
 		
-		if not luau_vm.do_string(\"\"\"
-			print(require(\"poop\"))
-		\"\"\"):
-			print(luau_vm.get_lua_error())
+		if luau_vm.do_string(\"\"\"
+			local poop, n = require(\"poop\")
+			print(n)
+			print(poop.poopin)
+		\"\"\") == -1:
+			print(\"Error: \" + luau_vm.tostring(-1))
+			luau_vm.pop(1)
 			return
-		#print(luau_vm.get_lua_return())
+		print(\"Stack top: \" + str(luau_vm.gettop()))
 
 		print(\"Finished.\")
 		
 		)
 
 
-func _funny(arguments: Array):
-	print(\"input: \", arguments)
-	luau_vm.do_string(\"return {shidded = true}\")
-	var r = luau_vm.get_lua_return()[0]
-	return r
+func _require():
+	var nargs := luau_vm.gettop()
+	if nargs == 0:
+		luau_vm.error_with_traceback(\"missing argument #1 (string expected)\")
+		return 0
+	
+	if not luau_vm.isstring(1):
+		luau_vm.pop(nargs)
+		luau_vm.error_with_traceback(\"invalid argument #1 (string expected)\")
+		return 0
+
+	var path := luau_vm.tostring(1)
+	luau_vm.pop(nargs)
+
+	if luau_vm.do_string(\"return {poopin = 'shat -> \" + path + \"'}, 3+{}\", path) == -1:
+		luau_vm.error()
+		luau_vm.pop(1)
+		return 0
+	
+	return luau_vm.gettop()
 
 func _on_luau_vm_stdout(message: String):
 	print(message)

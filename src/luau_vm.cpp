@@ -51,8 +51,6 @@ LuauVM::~LuauVM() {
 
 void LuauVM::_bind_methods() {
     ClassDB::bind_method(D_METHOD("do_string", "code", "chunkname"), &LuauVM::do_string, DEFVAL("do_string"));
-    ClassDB::bind_method(D_METHOD("get_lua_error"), &LuauVM::get_lua_error);
-    ClassDB::bind_method(D_METHOD("get_lua_return"), &LuauVM::get_lua_return);
 
     ClassDB::bind_method(D_METHOD("open_libraries", "libraries"), &LuauVM::open_libraries);
     ClassDB::bind_method(D_METHOD("open_all_libraries"), &LuauVM::open_all_libraries);
@@ -230,54 +228,27 @@ static lua_CompileOptions luau_vm_compile_options = {
 // 	return 1;
 // }
 
-bool LuauVM::do_string(const String &code, const String &chunkname) {
+int LuauVM::do_string(const String &code, const String &chunkname) {
     auto utf8 = code.ascii();
     auto source = utf8.get_data();
     size_t bytecodeSize = 0;
     char *bytecode = luau_compile(source, strlen(source), &luau_vm_compile_options, &bytecodeSize);
     if (bytecode == nullptr) {
-        last_lua_error = "Error: bytecode compilation failed.";
-        return false;
+        lua_pushstring(L, "Error: bytecode compilation failed.");
+        return -1;
     }
+    
     int success = luau_load(L, chunkname.ascii().get_data(), bytecode, bytecodeSize, 0);
     std::free(bytecode);
 
-    if (success != LUA_OK) {
-        const char *err = lua_tostring(L, -1);
-        if (err == NULL)
-            err = "Unknown (Loading)";
-        last_lua_error = err;
-        lua_pop(L, 1);
-        return false;
-    }
+    if (success != LUA_OK)
+        return -1;
     
     success = lua_pcall(L, 0, LUA_MULTRET, 0);
-    if (success != LUA_OK) {
-        const char *err = lua_tostring(L, -1);
-        if (err == NULL)
-            err = "Unknown (Calling)";
-        last_lua_error = err;
-        lua_pop(L, 1);
-        return false;
-    }
+    if (success != LUA_OK)
+        return -1;
 
-    last_lua_return.clear();
-    int nreturned = lua_gettop(L);
-    for (int i = 1; i <= nreturned; i++) {
-        last_lua_return.push_back(lua_tovariant(L, i));
-    }
-
-    lua_pop(L, nreturned);
-
-    return true;
-}
-
-String LuauVM::get_lua_error() {
-    return String(last_lua_error);
-}
-
-Array LuauVM::get_lua_return() {
-    return last_lua_return;
+    return lua_gettop(L);
 }
 
 void LuauVM::error_with_traceback(const String &message) {

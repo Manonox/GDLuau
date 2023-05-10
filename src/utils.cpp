@@ -120,8 +120,8 @@ godot::Variant lua_tovariant(lua_State *L, int idx) {
         }
 
         case LUA_TTABLE: {
-            // if (luaL_isarray(L, idx))
-            //     return lua_toarray(L, idx);
+            if (luaL_isarray(L, idx))
+                return lua_toarray(L, idx);
             return lua_todictionary(L, idx);
         }
 
@@ -220,30 +220,9 @@ static int lua_pushcallable_method(lua_State *L) {
         return 0;
     }
 
-    godot::Array lua_arguments;
-    int arg_count = lua_gettop(L);
-    for (int i = 1; i <= arg_count; i++) {
-        godot::Variant arg = lua_tovariant(L, i);
-        lua_arguments.push_back(arg);
-    }
+    int nresults = object_p->callv(p_callablewrapped->method, godot::Array()); // Work-around, can't use 'call' for some reason
 
-    lua_pop(L, arg_count);
-    
-    godot::Array arguments;
-    arguments.push_back(lua_arguments);
-    godot::Variant result = object_p->callv(p_callablewrapped->method, arguments); // Work-around, can't use 'call' for some reason
-
-    godot::Array results;
-    if (result.get_type() != godot::Variant::Type::ARRAY)
-        results.push_back(result);
-    else
-        results = result;
-
-    for (int64_t i = 0; i < results.size(); i++) {
-        lua_pushvariant(L, results[i]);
-    }
-
-    return results.size();
+    return nresults;
 }
 
 void lua_pushcallable(lua_State *L, const godot::Callable &callable) {
