@@ -13,11 +13,16 @@ func _ready():
 		luau_vm.open_all_libraries()
 
 		print(\"Running...\")
+
+		luau_vm.pushcallable(self._funny)
+		luau_vm.setglobal(\"require\")
 		
-		if not luau_vm.do_string(\"return {shidder = 3}\"):
+		if not luau_vm.do_string(\"\"\"
+			print(require(\"poop\"))
+		\"\"\"):
 			print(luau_vm.get_lua_error())
 			return
-		print(luau_vm.get_lua_return())
+		#print(luau_vm.get_lua_return())
 
 		print(\"Finished.\")
 		
@@ -26,8 +31,9 @@ func _ready():
 
 func _funny(arguments: Array):
 	print(\"input: \", arguments)
-	luau_vm.error_with_traceback(\"Very sad :(\")
-	return [Vector3(2.0, -3.3, 0.0), 3]
+	luau_vm.do_string(\"return {shidded = true}\")
+	var r = luau_vm.get_lua_return()[0]
+	return r
 
 func _on_luau_vm_stdout(message: String):
 	print(message)

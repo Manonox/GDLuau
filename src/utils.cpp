@@ -226,6 +226,8 @@ static int lua_pushcallable_method(lua_State *L) {
         godot::Variant arg = lua_tovariant(L, i);
         lua_arguments.push_back(arg);
     }
+
+    lua_pop(L, arg_count);
     
     godot::Array arguments;
     arguments.push_back(lua_arguments);
