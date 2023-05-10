@@ -120,8 +120,8 @@ godot::Variant lua_tovariant(lua_State *L, int idx) {
         }
 
         case LUA_TTABLE: {
-            if (luaL_isarray(L, idx))
-                return lua_toarray(L, idx);
+            // if (luaL_isarray(L, idx))
+            //     return lua_toarray(L, idx);
             return lua_todictionary(L, idx);
         }
 
