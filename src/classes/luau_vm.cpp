@@ -59,10 +59,7 @@ void LuauVM::_bind_methods() {
     ClassDB::bind_method(D_METHOD("push_error_handler"), &LuauVM::push_error_handler);
 
     ClassDB::bind_method(D_METHOD("load_string", "code", "chunkname"), &LuauVM::load_string, DEFVAL("loadstring"));
-    ClassDB::bind_method(D_METHOD("loadstring", "code", "chunkname"), &LuauVM::load_string, DEFVAL("loadstring"));
-
     ClassDB::bind_method(D_METHOD("do_string", "code", "chunkname"), &LuauVM::do_string, DEFVAL("dostring"));
-    ClassDB::bind_method(D_METHOD("dostring", "code", "chunkname"), &LuauVM::do_string, DEFVAL("dostring"));
 
     ClassDB::bind_method(D_METHOD("open_libraries", "libraries"), &LuauVM::open_libraries);
     ClassDB::bind_method(D_METHOD("open_all_libraries"), &LuauVM::open_all_libraries);

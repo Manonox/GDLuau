@@ -73,6 +73,10 @@ void LuauVM::_bind_passthrough_methods() {
 
     // Default library
     {
+        ClassDB::bind_method(D_METHOD("lua_loadstring", "code", "chunkname"), &LuauVM::load_string, DEFVAL("loadstring"));
+        ClassDB::bind_method(D_METHOD("lua_dostring", "code", "chunkname"), &LuauVM::do_string, DEFVAL("dostring"));
+
+        ClassDB::bind_method(D_METHOD("lua_concat", "n"), &LuauVM::lua_concat);
         ClassDB::bind_method(D_METHOD("lua_call", "nargs", "nresults"), &LuauVM::lua_call);
         ClassDB::bind_method(D_METHOD("lua_concat", "n"), &LuauVM::lua_concat);
         ClassDB::bind_method(D_METHOD("lua_createtable", "narr", "nrec"), &LuauVM::lua_createtable);
