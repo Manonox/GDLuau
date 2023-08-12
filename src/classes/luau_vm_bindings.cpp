@@ -70,9 +70,7 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("lua_todictionary", "index"), &LuauVM::lua_todictionary);
 
         ClassDB::bind_method(D_METHOD("lua_tofunction", "index"), &LuauVM::lua_tofunction);
-        ClassDB::bind_method(D_METHOD("lua_pushcallable", "func"), &LuauVM::lua_pushcallable);
-        ClassDB::bind_method(D_METHOD("lua_pushfunction", "func"), &LuauVM::lua_pushcallable);
-        ClassDB::bind_method(D_METHOD("lua_pushfunc", "func"), &LuauVM::lua_pushcallable);
+        ClassDB::bind_method(D_METHOD("lua_pushcallable", "func", "debugname"), &LuauVM::lua_pushcallable, DEFVAL(""));
 
         ClassDB::bind_method(D_METHOD("lua_pushobject", "object"), &LuauVM::lua_pushobject);
         ClassDB::bind_method(D_METHOD("lua_toobject", "index"), &LuauVM::lua_toobject);
@@ -216,10 +214,10 @@ Ref<LuauFunction> LuauVM::lua_tofunction(int index) {
     return ::lua_tofunction(L, index);
 }
 
-Error LuauVM::lua_pushcallable(const Callable &callable) {
+Error LuauVM::lua_pushcallable(const Callable &callable, const String &debugname) {
     ERR_FAIL_COND_V_MSG(callable.is_custom(), ERR_INVALID_PARAMETER, "Cannot push callable, lambda callables aren't supported.");
     ERR_FAIL_COND_V_MSG(callable.is_null(), ERR_INVALID_PARAMETER, "Cannot push callable, the provided callable is invalid.");
-    ::lua_pushcallable(L, callable);
+    ::lua_pushcallable(L, callable, debugname);
     return OK;
 }
 

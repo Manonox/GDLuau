@@ -8,18 +8,27 @@ func _ready():
 
 	vm.open_all_libraries()
 	
-	vm.lua_pushobject(self)
-	vm.lua_setfield(vm.LUA_GLOBALSINDEX, "node")
+	vm.lua_pushdictionary({
+		funny = self.funny
+	})
+	vm.lua_setglobal("t")
 
 	var success := vm.lua_dostring("""
-		node.shit = 3
+		local v = t.funny
+		local funcname = debug.info(v, \"n\")
+		funcname = funcname ~= \"\" and (funcname .. \" at \") or funcname
+		print(tostring(v), \"-- \" .. funcname .. debug.info(v, \"s\") .. \":\" .. debug.info(v, \"l\"))
 	""")
 	
 	if success != vm.LUA_OK:
 		print(vm.lua_tostring(-1))
 		vm.lua_pop()
 		return
-	
+
+
+func funny() -> int:
+	return 0
+
 
 func _on_luau_vm_stdout(message):
 	print(message)

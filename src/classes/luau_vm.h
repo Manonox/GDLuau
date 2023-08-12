@@ -55,7 +55,7 @@ public:
     Dictionary lua_todictionary(int index);
     
     Ref<LuauFunction> lua_tofunction(int index);
-    Error lua_pushcallable(const Callable &callable);
+    Error lua_pushcallable(const Callable &callable, const String &debugname);
 
     void lua_pushobject(Object *node);
     Object *lua_toobject(int idx);
