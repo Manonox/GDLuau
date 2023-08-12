@@ -138,6 +138,7 @@ public:
 
     int lua_ref(int t);
     void lua_unref(int ref);
+    int (lua_getref)(int ref);
 
     #pragma endregion
 
@@ -162,7 +163,7 @@ public:
     Object *luaL_checkobject(int narg, bool valid);
     void luaL_checktype(int narg, int type);
     void luaL_checkstack(int sz, const String &messsage);
-    int luaL_checkoption(int narg, const String &def, const Array &array);
+    int luaL_checkoption(int narg, const Array &array, const String &def);
 
     #pragma endregion
 };

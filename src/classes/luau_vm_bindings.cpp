@@ -150,11 +150,13 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("lua_setupvalue", "index", "n"), &LuauVM::lua_setupvalue);
         ClassDB::bind_method(D_METHOD("lua_gc", "what", "data"), &LuauVM::lua_gc, DEFVAL(0));
         
-        ClassDB::bind_method(D_METHOD("lua_ref", "t"), &LuauVM::lua_ref);
+        ClassDB::bind_method(D_METHOD("lua_ref", "index"), &LuauVM::lua_ref);
         ClassDB::bind_method(D_METHOD("lua_unref", "ref"), &LuauVM::lua_unref);
+        ClassDB::bind_method(D_METHOD("lua_getref", "ref"), &LuauVM::lua_getref);
 
-        ClassDB::bind_method(D_METHOD("luaL_ref", "t"), &LuauVM::lua_ref);
+        ClassDB::bind_method(D_METHOD("luaL_ref", "index"), &LuauVM::lua_ref);
         ClassDB::bind_method(D_METHOD("luaL_unref", "ref"), &LuauVM::lua_unref);
+        ClassDB::bind_method(D_METHOD("luaL_getref", "ref"), &LuauVM::lua_getref);
     }
 
     // Auxiliary library
@@ -179,7 +181,7 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("luaL_checktype", "narg", "type"), &LuauVM::luaL_checktype);
         ClassDB::bind_method(D_METHOD("luaL_checkstack", "size", "message"), &LuauVM::luaL_checkstack);
         // ClassDB::bind_method(D_METHOD("luaL_checkudata", ""))
-        ClassDB::bind_method(D_METHOD("luaL_checkoption", "narg", "type"), &LuauVM::luaL_checkoption);
+        ClassDB::bind_method(D_METHOD("luaL_checkoption", "narg", "array", "def"), &LuauVM::luaL_checkoption, DEFVAL(""));
     }
 }
 
@@ -507,12 +509,16 @@ int LuauVM::lua_gc(int what, int data) {
     return ::lua_gc(L, what, data);
 }
 
-int LuauVM::lua_ref(int t) {
-    return ::lua_ref(L, t);
+int LuauVM::lua_ref(int index) {
+    return ::lua_ref(L, index);
 }
 
 void LuauVM::lua_unref(int ref) {
     ::lua_unref(L, ref);
+}
+
+int (LuauVM::lua_getref)(int ref) {
+    return ::lua_getref(L, ref);
 }
 
 // lua_resume
@@ -612,7 +618,7 @@ void LuauVM::luaL_checkstack(int sz, const String &messsage) {
 
 // luaL_checkudata
 
-int LuauVM::luaL_checkoption(int narg, const String &def, const Array &array) {
+int LuauVM::luaL_checkoption(int narg, const Array &array, const String &def) {
     auto size = array.size();
     const char * * lst = (const char * *)memalloc(sizeof(const char *) * size);
     for (int64_t i = 0; i < size; i++) {
@@ -626,7 +632,10 @@ int LuauVM::luaL_checkoption(int narg, const String &def, const Array &array) {
         }
     }
     
-    int result = ::luaL_checkoption(L, narg, def.ascii().get_data(), lst);
+    const char *def_p = NULL;
+    if (!def.is_empty())
+        def_p = def.ascii().get_data();
+    int result = ::luaL_checkoption(L, narg, def_p, lst);
     memfree(lst);
 
     return result;
