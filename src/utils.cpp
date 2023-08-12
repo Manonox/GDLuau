@@ -62,6 +62,12 @@ void lua_pushvariant(lua_State *L, const godot::Variant &var) {
             break;
         }
 
+        case godot::Variant::Type::OBJECT: {
+            godot::Object *o = var.operator godot::Object *();
+            lua_pushobject(L, o);
+            break;
+        }
+
         default: {
             lua_pushnil(L);
             break;
@@ -132,6 +138,14 @@ godot::Variant lua_tovariant(lua_State *L, int idx) {
             return lua_tofunction(L, idx);
         }
 
+        case LUA_TUSERDATA: {
+            if (lua_isobject(L, idx)) {
+                return lua_toobject(L, idx);
+            }
+
+            return godot::Variant();
+        }
+
         default: {
             return godot::Variant();
         }
@@ -139,7 +153,8 @@ godot::Variant lua_tovariant(lua_State *L, int idx) {
 }
 
 
-godot::Array lua_toarray(lua_State *L, int idx) {
+godot::Variant lua_toarray(lua_State *L, int idx) {
+    if (!lua_istable(L, idx)) return godot::Variant();
     size_t length = lua_objlen(L, idx);
     godot::Array array;
     for (int i = 1; i <= length; i++) {
@@ -150,7 +165,8 @@ godot::Array lua_toarray(lua_State *L, int idx) {
     return array;
 }
 
-godot::Dictionary lua_todictionary(lua_State *L, int idx) {
+godot::Variant lua_todictionary(lua_State *L, int idx) {
+    if (!lua_istable(L, idx)) return godot::Variant();
     godot::Dictionary dict;
     lua_pushvalue(L, idx);
     lua_pushnil(L);
@@ -238,3 +254,64 @@ void lua_pushcallable(lua_State *L, const godot::Callable &callable) {
     p_callablewrapped->method = callable.get_method().c_escape().ptr();
     lua_pushcclosure(L, lua_pushcallable_method, NULL, 1);
 }
+
+
+bool luaL_hasmetatable(lua_State* L, int idx, const char* tname) {
+    if (!lua_getmetatable(L, idx))
+        return false;
+    luaL_getmetatable(L, tname);
+    bool result = lua_rawequal(L, -2, -1);
+    lua_pop(L, 2);
+    return result;
+}
+
+
+typedef struct ObjectWrapped {
+    int64_t object_id;
+} ObjectWrapped;
+
+void lua_pushobject(lua_State *L, godot::Object *object) {
+    int tag = 0;
+    if (object->is_class("RefCounted")) {
+        godot::RefCounted *refcounted = reinterpret_cast<godot::RefCounted *>(object);
+        refcounted->reference();
+        tag = 1;
+    }
+    ObjectWrapped *p_nodewrapped = (ObjectWrapped *)lua_newuserdatatagged(L, sizeof(ObjectWrapped), tag);
+    p_nodewrapped->object_id = object->get_instance_id();
+    luaL_getmetatable(L, "object");
+    lua_setmetatable(L, -2);
+}
+
+void object_userdata_dtor(lua_State *L, void *data) {
+    ObjectWrapped *p_nodewrapped = reinterpret_cast<ObjectWrapped *>(data);
+    godot::Object *object = godot::ObjectDB::get_instance(p_nodewrapped->object_id);
+    if (object == NULL) return;
+    godot::RefCounted *refcounted = godot::Object::cast_to<godot::RefCounted>(object);
+    if (refcounted == NULL) return;
+    refcounted->unreference();
+}
+
+godot::Object *lua_toobject(lua_State *L, int idx) {
+    ObjectWrapped *p_nodewrapped = (ObjectWrapped *)lua_touserdata(L, idx);
+    if (p_nodewrapped == NULL) return NULL; // Not userdata
+    if (!luaL_hasmetatable(L, idx, "object")) return NULL; // Not "Object"
+    return godot::ObjectDB::get_instance(p_nodewrapped->object_id);
+}
+
+int lua_isobject(lua_State *L, int idx) {
+    if (!lua_isuserdata(L, idx)) return 0; // Not userdata
+    if (!luaL_hasmetatable(L, idx, "object")) return 0; // Not "Object"
+    return 1;
+}
+
+godot::Object *luaL_checkobject(lua_State *L, int idx, bool valid) {
+    ObjectWrapped *p_nodewrapped = (ObjectWrapped *)luaL_checkudata(L, idx, "object");
+    godot::Object *object = godot::ObjectDB::get_instance(p_nodewrapped->object_id);
+    if (valid && object == NULL)
+        luaL_typeerrorL(L, idx, "object");
+        return NULL;
+    return object;
+}
+
+

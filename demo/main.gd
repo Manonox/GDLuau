@@ -8,37 +8,18 @@ func _ready():
 
 	vm.open_all_libraries()
 	
-	var success := vm.load_string("""
-		function fuckoff(x: number): table
-			return { x = x }
-		end
+	vm.lua_pushobject(self)
+	vm.lua_setfield(vm.LUA_GLOBALSINDEX, "node")
 
-		local t = {}
-		for i, x in {1, 2, 3} do
-			t[i] = fuckoff(x)
-		end
-
-		for _, v in t do
-			print(`COCK AND BALLS {v.x}`)
-		end
+	var success := vm.lua_dostring("""
+		node.shit = 3
 	""")
 	
-	if not success:
-		print(":(")
+	if success != vm.LUA_OK:
+		print(vm.lua_tostring(-1))
+		vm.lua_pop()
 		return
 	
-	vm.lua_pushdictionary({ poop = 7 })
-	vm.lua_pushcallable(self._magic)
-	var status := vm.lua_pcall(2, 0, 0)
-	if status != vm.LUA_OK:
-		var error := vm.lua_tostring(-1)
-		vm.lua_pop(1)
-		print(error)
-
-func _magic() -> int:
-	var x := vm.luaL_checknumber(1)
-	vm.lua_pushnumber(x * x - 7)
-	return 1
 
 func _on_luau_vm_stdout(message):
 	print(message)

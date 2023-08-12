@@ -21,6 +21,7 @@ class LuauVM : public Node {
 
 private:
     lua_State* L;
+    void create_metatables();
 
 protected:
     static void _bind_methods();
@@ -30,13 +31,10 @@ public:
     LuauVM();
     ~LuauVM();
 
-    void _error_handler() {}
-
     void register_print();
-    void push_error_handler();
 
-    bool load_string(const String &code, const String &chunkname);
-    bool do_string(const String &code, const String &chunkname);
+    int load_string(const String &code, const String &chunkname);
+    int do_string(const String &code, const String &chunkname);
 
     void open_libraries(const Array &libraries);
     void open_all_libraries();
@@ -59,9 +57,14 @@ public:
     Ref<LuauFunction> lua_tofunction(int index);
     Error lua_pushcallable(const Callable &callable);
 
+    void lua_pushobject(Object *node);
+    Object *lua_toobject(int idx);
+    bool lua_isobject(int idx);
+
     #pragma endregion
 
     #pragma region Default
+    void lua_setreadonly(int index, bool enabled);
 
     void lua_call(int nargs, int nresults);
     void lua_concat(int n);
@@ -81,6 +84,8 @@ public:
     bool (lua_isnone)(int index);
     bool (lua_isnoneornil)(int index);
     bool lua_isnumber(int index);
+    bool lua_isinteger(int index);
+    bool(lua_isnumberx)(int index);
     bool lua_isstring(int index);
     bool (lua_istable)(int index);
     bool (lua_isthread)(int index);
@@ -106,8 +111,10 @@ public:
     bool lua_rawequal(int index1, int index2);
     void lua_rawget(int index);
     void lua_rawgeti(int index, int n);
+    void lua_rawgetfield(int index, const String &key);
     void lua_rawset(int index);
     void lua_rawseti(int index, int n);
+    void lua_rawsetfield(int index, const String &key);
     void lua_remove(int index);
     void lua_replace(int index);
     bool lua_setfenv(int index);
@@ -116,11 +123,13 @@ public:
     bool lua_setmetatable(int index);
     void lua_settable(int index);
     void lua_settop(int index);
+
     int lua_status();
     bool lua_toboolean(int index);
     int64_t (lua_tointeger)(int index);
     double (lua_tonumber)(int index);
     String (lua_tostring)(int index);
+    Vector3 lua_tovector(int index);
     int lua_type(int index);
     String lua_typename(int type);
     String lua_getupvalue(int index, int n);
@@ -134,19 +143,23 @@ public:
 
     #pragma region Auxiliary
 
-    void (luaL_error)(const String &err);
+    bool luaL_hasmetatable(int index, const String &tname);
+
+    void(luaL_error)(const String &err);
     bool luaL_callmeta(int obj, const String &field);
     bool luaL_getmetafield(int obj, const String &field);
     bool luaL_newmetatable(const String &tname);
     bool (luaL_getmetatable)(const String &tname);
     void luaL_where(int lvl);
     void luaL_typerror(int nargs, const String &tname);
+    void (luaL_argcheck)(bool cond, int narg, const String &msg);
 
     void luaL_checkany(int narg);
     int luaL_checkint(int narg);
     double luaL_checknumber(int narg);
-    String (luaL_checkstring)(int narg);
+    String(luaL_checkstring)(int narg);
     Vector3 luaL_checkvector(int narg);
+    Object *luaL_checkobject(int narg, bool valid);
     void luaL_checktype(int narg, int type);
     void luaL_checkstack(int sz, const String &messsage);
     int luaL_checkoption(int narg, const String &def, const Array &array);

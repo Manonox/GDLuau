@@ -51,6 +51,10 @@ void LuauVM::_bind_passthrough_methods() {
         BIND_ENUM_CONSTANT(LUA_GCSETSTEPSIZE);
 
         // Other
+        BIND_ENUM_CONSTANT(LUA_REGISTRYINDEX);
+        BIND_ENUM_CONSTANT(LUA_GLOBALSINDEX);
+        BIND_ENUM_CONSTANT(LUA_NOREF);
+        BIND_ENUM_CONSTANT(LUA_REFNIL);
         BIND_ENUM_CONSTANT(LUA_MULTRET);
     }
 
@@ -69,6 +73,10 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("lua_pushcallable", "func"), &LuauVM::lua_pushcallable);
         ClassDB::bind_method(D_METHOD("lua_pushfunction", "func"), &LuauVM::lua_pushcallable);
         ClassDB::bind_method(D_METHOD("lua_pushfunc", "func"), &LuauVM::lua_pushcallable);
+
+        ClassDB::bind_method(D_METHOD("lua_pushobject", "object"), &LuauVM::lua_pushobject);
+        ClassDB::bind_method(D_METHOD("lua_toobject", "index"), &LuauVM::lua_toobject);
+        ClassDB::bind_method(D_METHOD("lua_isobject", "index"), &LuauVM::lua_isobject);
     }
 
     // Default library
@@ -76,7 +84,8 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("lua_loadstring", "code", "chunkname"), &LuauVM::load_string, DEFVAL("loadstring"));
         ClassDB::bind_method(D_METHOD("lua_dostring", "code", "chunkname"), &LuauVM::do_string, DEFVAL("dostring"));
 
-        ClassDB::bind_method(D_METHOD("lua_concat", "n"), &LuauVM::lua_concat);
+        ClassDB::bind_method(D_METHOD("lua_setreadonly", "index", "enabled"), &LuauVM::lua_setreadonly);
+
         ClassDB::bind_method(D_METHOD("lua_call", "nargs", "nresults"), &LuauVM::lua_call);
         ClassDB::bind_method(D_METHOD("lua_concat", "n"), &LuauVM::lua_concat);
         ClassDB::bind_method(D_METHOD("lua_createtable", "narr", "nrec"), &LuauVM::lua_createtable);
@@ -95,6 +104,8 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("lua_isnone", "index"), &LuauVM::lua_isnone);
         ClassDB::bind_method(D_METHOD("lua_isnoneornil", "index"), &LuauVM::lua_isnoneornil);
         ClassDB::bind_method(D_METHOD("lua_isnumber", "index"), &LuauVM::lua_isnumber);
+        ClassDB::bind_method(D_METHOD("lua_isinteger", "index"), &LuauVM::lua_isinteger);
+        ClassDB::bind_method(D_METHOD("lua_isnumberx", "index"), &LuauVM::lua_isnumberx);
         ClassDB::bind_method(D_METHOD("lua_isstring", "index"), &LuauVM::lua_isstring);
         ClassDB::bind_method(D_METHOD("lua_istable", "index"), &LuauVM::lua_istable);
         ClassDB::bind_method(D_METHOD("lua_isthread", "index"), &LuauVM::lua_isthread);
@@ -115,8 +126,10 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("lua_rawequal", "index1", "index2"), &LuauVM::lua_rawequal);
         ClassDB::bind_method(D_METHOD("lua_rawget", "index"), &LuauVM::lua_rawget);
         ClassDB::bind_method(D_METHOD("lua_rawgeti", "index", "n"), &LuauVM::lua_rawgeti);
+        ClassDB::bind_method(D_METHOD("lua_rawgetfield", "index", "key"), &LuauVM::lua_rawgetfield);
         ClassDB::bind_method(D_METHOD("lua_rawset", "index"), &LuauVM::lua_rawset);
         ClassDB::bind_method(D_METHOD("lua_rawseti", "index", "n"), &LuauVM::lua_rawseti);
+        ClassDB::bind_method(D_METHOD("lua_rawsetfield", "index", "key"), &LuauVM::lua_rawsetfield);
         ClassDB::bind_method(D_METHOD("lua_remove", "index"), &LuauVM::lua_remove);
         ClassDB::bind_method(D_METHOD("lua_replace", "index"), &LuauVM::lua_replace);
         ClassDB::bind_method(D_METHOD("lua_setfenv", "index"), &LuauVM::lua_setfenv);
@@ -130,6 +143,7 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("lua_tointeger", "index"), &LuauVM::lua_tointeger);
         ClassDB::bind_method(D_METHOD("lua_tonumber", "index"), &LuauVM::lua_tonumber);
         ClassDB::bind_method(D_METHOD("lua_tostring", "index"), &LuauVM::lua_tostring);
+        ClassDB::bind_method(D_METHOD("lua_tovector", "index"), &LuauVM::lua_tovector);
         ClassDB::bind_method(D_METHOD("lua_type", "index"), &LuauVM::lua_type);
         ClassDB::bind_method(D_METHOD("lua_typename", "type"), &LuauVM::lua_typename);
         ClassDB::bind_method(D_METHOD("lua_getupvalue", "index", "n"), &LuauVM::lua_getupvalue);
@@ -145,6 +159,8 @@ void LuauVM::_bind_passthrough_methods() {
 
     // Auxiliary library
     {
+        ClassDB::bind_method(D_METHOD("luaL_hasmetatable", "index", "tname"), &LuauVM::luaL_hasmetatable);
+
         ClassDB::bind_method(D_METHOD("luaL_error", "s"), &LuauVM::luaL_error);
         ClassDB::bind_method(D_METHOD("luaL_callmeta", "obj", "field"), &LuauVM::luaL_callmeta);
         ClassDB::bind_method(D_METHOD("luaL_getmetafield", "obj", "field"), &LuauVM::luaL_getmetafield);
@@ -152,13 +168,17 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("luaL_newmetatable", "tname"), &LuauVM::luaL_newmetatable);
         ClassDB::bind_method(D_METHOD("luaL_where", "lvl"), &LuauVM::luaL_where);
         ClassDB::bind_method(D_METHOD("luaL_typerror", "narg", "tname"), &LuauVM::luaL_typerror);
+        ClassDB::bind_method(D_METHOD("luaL_argcheck", "cond", "narg", "msg"), &LuauVM::luaL_argcheck);
 
         ClassDB::bind_method(D_METHOD("luaL_checkany", "narg"), &LuauVM::luaL_checkany);
         ClassDB::bind_method(D_METHOD("luaL_checkint", "narg"), &LuauVM::luaL_checkint);
         ClassDB::bind_method(D_METHOD("luaL_checkstring", "narg"), &LuauVM::luaL_checkstring);
         ClassDB::bind_method(D_METHOD("luaL_checknumber", "narg"), &LuauVM::luaL_checknumber);
+        ClassDB::bind_method(D_METHOD("luaL_checkvector", "narg"), &LuauVM::luaL_checkvector);
+        ClassDB::bind_method(D_METHOD("luaL_checkobject", "narg"), &LuauVM::luaL_checkobject);
         ClassDB::bind_method(D_METHOD("luaL_checktype", "narg", "type"), &LuauVM::luaL_checktype);
         ClassDB::bind_method(D_METHOD("luaL_checkstack", "size", "message"), &LuauVM::luaL_checkstack);
+        // ClassDB::bind_method(D_METHOD("luaL_checkudata", ""))
         ClassDB::bind_method(D_METHOD("luaL_checkoption", "narg", "type"), &LuauVM::luaL_checkoption);
     }
 }
@@ -201,10 +221,26 @@ Error LuauVM::lua_pushcallable(const Callable &callable) {
     return OK;
 }
 
+void LuauVM::lua_pushobject(Object *object) {
+    ::lua_pushobject(L, object);
+}
+
+godot::Object *LuauVM::lua_toobject(int index) {
+    return ::lua_toobject(L, index);
+}
+
+bool LuauVM::lua_isobject(int index) {
+    return ::lua_isobject(L, index);
+}
+
 #pragma endregion
 
 
 #pragma region Default
+
+void LuauVM::lua_setreadonly(int index, bool enabled) {
+    ::lua_setreadonly(L, index, enabled);
+}
 
 void LuauVM::lua_call(int nargs, int nresults) {
     ::lua_call(L, nargs, nresults);
@@ -277,6 +313,20 @@ bool (LuauVM::lua_isnoneornil)(int index) {
 bool LuauVM::lua_isnumber(int index) {
 	return ::lua_isnumber(L, index);
 }
+
+bool LuauVM::lua_isinteger(int index) {
+    if (!lua_isnumber(index))
+        return false;
+    double x = (lua_tonumber)(index);
+    return x == (int)x;
+}
+
+bool (LuauVM::lua_isnumberx)(int index) {
+    int isnum;
+    ::lua_tonumberx(L, index, &isnum);
+    return isnum;
+}
+
 
 bool LuauVM::lua_isstring(int index) {
 	return ::lua_isstring(L, index);
@@ -364,12 +414,20 @@ void LuauVM::lua_rawgeti(int index, int n) {
     ::lua_rawgeti(L, index, n);
 }
 
+void LuauVM::lua_rawgetfield(int index, const String &key) {
+    ::lua_rawgetfield(L, index, key.ascii().get_data());
+}
+
 void LuauVM::lua_rawset(int index) {
     ::lua_rawset(L, index);
 }
 
 void LuauVM::lua_rawseti(int index, int n) {
     ::lua_rawseti(L, index, n);
+}
+
+void LuauVM::lua_rawsetfield(int index, const String &key) {
+    ::lua_rawsetfield(L, index, key.ascii().get_data());
 }
 
 void LuauVM::lua_remove(int index) {
@@ -424,6 +482,11 @@ String (LuauVM::lua_tostring)(int index) {
 	return String(::lua_tostring(L, index));
 }
 
+Vector3 LuauVM::lua_tovector(int index) {
+    const float* vec = ::lua_tovector(L, index);
+    return Vector3(vec[0], vec[1], vec[2]);
+}
+
 int LuauVM::lua_type(int index) {
     return ::lua_type(L, index);
 }
@@ -468,6 +531,11 @@ void LuauVM::lua_unref(int ref) {
 
 #pragma region Auxiliary
 
+
+bool LuauVM::luaL_hasmetatable(int index, const String &tname) {
+    return ::luaL_hasmetatable(L, index, tname.ascii().get_data());
+}
+
 void (LuauVM::luaL_error)(const String &err) {
     ::luaL_error(L, err.ascii().get_data());
 }
@@ -495,6 +563,11 @@ void LuauVM::luaL_where(int lvl) {
 void LuauVM::luaL_typerror(int nargs, const String &tname) {
     ::luaL_typeerror(L, nargs, tname.ascii().get_data());
 }
+
+void (LuauVM::luaL_argcheck)(bool cond, int narg, const String &msg) {
+    ((void)((cond) ? (void)0 : ::luaL_argerror(L, narg, msg.ascii().get_data())));
+}
+
 
 void LuauVM::luaL_checkany(int narg) {
     ::luaL_checkany(L, narg);
@@ -524,6 +597,10 @@ Vector3 LuauVM::luaL_checkvector(int narg) {
     return Vector3(v[0], v[1], v[2]);
 }
 #endif
+
+Object *LuauVM::luaL_checkobject(int narg, bool valid) {
+    return ::luaL_checkobject(L, narg, valid);
+}
 
 void LuauVM::luaL_checktype(int narg, int type) {
     ::luaL_checktype(L, narg, type);

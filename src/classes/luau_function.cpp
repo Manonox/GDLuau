@@ -44,11 +44,7 @@ Ref<LuauFunctionResult> LuauFunction::pcallv(const Array &args) {
 }
 
 Ref<LuauFunctionResult> LuauFunction::pcall_internal(int nargs) {
-    LuauVM *node = reinterpret_cast<LuauVM*>(lua_getnode(L));
-    node->push_error_handler();
-    lua_insert(L, 1);
-    int result = lua_pcall(L, nargs, LUA_MULTRET, 1);
-    lua_remove(L, 1);
+    int result = lua_pcall(L, nargs, LUA_MULTRET, 0);
 
     if (result != LUA_OK) {
         const char *err = lua_tostring(L, -1); // Pull error message
