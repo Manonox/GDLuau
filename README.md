@@ -26,7 +26,7 @@ Compiling
 ------------
 - Clone the repo
 - Run `scons -j=4 platform=<platform>`
-- [A test project is included in the repo](https://github.com/Manonox/GDLuau/tree/master/project)
+- [A test project is included in the repo](https://github.com/Manonox/GDLuau/tree/master/demo)
   (binaries are in `res://addons/gdluau/bin`)
 
 ---------------

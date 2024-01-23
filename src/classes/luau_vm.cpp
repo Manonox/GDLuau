@@ -215,7 +215,7 @@ void LuauVM::open_all_libraries() {
 
 
 int64_t LuauVM::get_memory_usage_bytes() {
-    return lua_gc(LUA_GCCOUNTB, 0) + 1024 * lua_gc(LUA_GCCOUNT, 0);;
+    return lua_gc(LUA_GCCOUNTB, 0) + 1024 * lua_gc(LUA_GCCOUNT, 0);
 }
 
 
