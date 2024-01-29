@@ -29,6 +29,8 @@ bin/macos/*
 bin/windows/*
 !bin/windows/.gitkeep
 
+*.dll
+
 .sconsign*.dblite
 
 # Ignore custom.py
