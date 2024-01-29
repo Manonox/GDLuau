@@ -8,25 +8,6 @@
 #include <utils.h>
 
 
-
-void lua_setnode(lua_State* L, godot::LuauVM* node) {
-    lua_pushstring(L, GDLUAU_REGISTRY_NODE_KEY);
-    lua_pushlightuserdata(L, node);
-    lua_settable(L, LUA_REGISTRYINDEX);
-}
-
-godot::LuauVM* lua_getnode(lua_State* L) {
-    lua_pushstring(L, GDLUAU_REGISTRY_NODE_KEY);
-    lua_gettable(L, LUA_REGISTRYINDEX);
-    if (!lua_islightuserdata(L, -1)) {
-        lua_pop(L, 1);
-        return nullptr;
-    }
-    void *userdata = lua_tolightuserdata(L, -1);
-    lua_pop(L, 1);
-    return reinterpret_cast<godot::LuauVM*>(userdata);
-}
-
 using namespace godot;
 
 
@@ -215,7 +196,7 @@ void LuauVM::open_all_libraries() {
 
 
 int64_t LuauVM::get_memory_usage_bytes() {
-    return lua_gc(LUA_GCCOUNTB, 0) + 1024 * lua_gc(LUA_GCCOUNT, 0);;
+    return lua_gc(LUA_GCCOUNTB, 0) + 1024 * lua_gc(LUA_GCCOUNT, 0);
 }
 
 

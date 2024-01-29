@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://c1725j5vsidhq"]
+
+[ext_resource type="Script" path="res://LuauVM.gd" id="1_q513d"]
+
+[node name="LuauVM" type="LuauVM"]
+script = ExtResource("1_q513d")
+
+[connection signal="stdout" from="." to="." method="_on_stdout"]

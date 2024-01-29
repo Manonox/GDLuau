@@ -7,11 +7,8 @@
 #include <luacode.h>
 
 #include <classes/luau_function.h>
-#include <utils.h>
 #include <vector_lib.h>
 
-
-#define GDLUAU_REGISTRY_NODE_KEY "gdluau_node"
 
 
 namespace godot {
@@ -55,7 +52,7 @@ public:
     Dictionary lua_todictionary(int index);
     
     Ref<LuauFunction> lua_tofunction(int index);
-    Error lua_pushcallable(const Callable &callable);
+    Error lua_pushcallable(const Callable &callable, const String &debugname);
 
     void lua_pushobject(Object *node);
     Object *lua_toobject(int idx);
@@ -87,6 +84,7 @@ public:
     bool lua_isinteger(int index);
     bool(lua_isnumberx)(int index);
     bool lua_isstring(int index);
+    bool (lua_isvector)(int index);
     bool (lua_istable)(int index);
     bool (lua_isthread)(int index);
     bool lua_isuserdata(int index);
@@ -160,6 +158,7 @@ public:
     double luaL_checknumber(int narg);
     String(luaL_checkstring)(int narg);
     Vector3 luaL_checkvector(int narg);
+    bool lua_isvalidobject(int index);
     Object *luaL_checkobject(int narg, bool valid);
     void luaL_checktype(int narg, int type);
     void luaL_checkstack(int sz, const String &messsage);
@@ -169,8 +168,6 @@ public:
 };
 }
 
-void lua_setnode(lua_State* L, godot::LuauVM* node);
-godot::LuauVM* lua_getnode(lua_State* L);
 
 VARIANT_ENUM_CAST(lua_Status);
 VARIANT_ENUM_CAST(lua_Type);
@@ -178,3 +175,5 @@ VARIANT_ENUM_CAST(lua_GCOp);
 
 int luaopen_vector(lua_State *L);
 
+
+#include <utils.h>

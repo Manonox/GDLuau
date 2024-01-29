@@ -70,13 +70,12 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("lua_todictionary", "index"), &LuauVM::lua_todictionary);
 
         ClassDB::bind_method(D_METHOD("lua_tofunction", "index"), &LuauVM::lua_tofunction);
-        ClassDB::bind_method(D_METHOD("lua_pushcallable", "func"), &LuauVM::lua_pushcallable);
-        ClassDB::bind_method(D_METHOD("lua_pushfunction", "func"), &LuauVM::lua_pushcallable);
-        ClassDB::bind_method(D_METHOD("lua_pushfunc", "func"), &LuauVM::lua_pushcallable);
+        ClassDB::bind_method(D_METHOD("lua_pushcallable", "func", "debugname"), &LuauVM::lua_pushcallable, DEFVAL(""));
 
         ClassDB::bind_method(D_METHOD("lua_pushobject", "object"), &LuauVM::lua_pushobject);
         ClassDB::bind_method(D_METHOD("lua_toobject", "index"), &LuauVM::lua_toobject);
         ClassDB::bind_method(D_METHOD("lua_isobject", "index"), &LuauVM::lua_isobject);
+        ClassDB::bind_method(D_METHOD("lua_isvalidobject", "index"), &LuauVM::lua_isvalidobject);
     }
 
     // Default library
@@ -107,6 +106,7 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("lua_isinteger", "index"), &LuauVM::lua_isinteger);
         ClassDB::bind_method(D_METHOD("lua_isnumberx", "index"), &LuauVM::lua_isnumberx);
         ClassDB::bind_method(D_METHOD("lua_isstring", "index"), &LuauVM::lua_isstring);
+        ClassDB::bind_method(D_METHOD("lua_isvector", "index"), &LuauVM::lua_isvector);
         ClassDB::bind_method(D_METHOD("lua_istable", "index"), &LuauVM::lua_istable);
         ClassDB::bind_method(D_METHOD("lua_isthread", "index"), &LuauVM::lua_isthread);
         ClassDB::bind_method(D_METHOD("lua_isuserdata", "index"), &LuauVM::lua_isuserdata);
@@ -177,7 +177,7 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("luaL_checkstring", "narg"), &LuauVM::luaL_checkstring);
         ClassDB::bind_method(D_METHOD("luaL_checknumber", "narg"), &LuauVM::luaL_checknumber);
         ClassDB::bind_method(D_METHOD("luaL_checkvector", "narg"), &LuauVM::luaL_checkvector);
-        ClassDB::bind_method(D_METHOD("luaL_checkobject", "narg"), &LuauVM::luaL_checkobject);
+        ClassDB::bind_method(D_METHOD("luaL_checkobject", "narg", "valid"), &LuauVM::luaL_checkobject);
         ClassDB::bind_method(D_METHOD("luaL_checktype", "narg", "type"), &LuauVM::luaL_checktype);
         ClassDB::bind_method(D_METHOD("luaL_checkstack", "size", "message"), &LuauVM::luaL_checkstack);
         // ClassDB::bind_method(D_METHOD("luaL_checkudata", ""))
@@ -216,10 +216,10 @@ Ref<LuauFunction> LuauVM::lua_tofunction(int index) {
     return ::lua_tofunction(L, index);
 }
 
-Error LuauVM::lua_pushcallable(const Callable &callable) {
+Error LuauVM::lua_pushcallable(const Callable &callable, const String &debugname) {
     ERR_FAIL_COND_V_MSG(callable.is_custom(), ERR_INVALID_PARAMETER, "Cannot push callable, lambda callables aren't supported.");
     ERR_FAIL_COND_V_MSG(callable.is_null(), ERR_INVALID_PARAMETER, "Cannot push callable, the provided callable is invalid.");
-    ::lua_pushcallable(L, callable);
+    ::lua_pushcallable(L, callable, debugname);
     return OK;
 }
 
@@ -332,6 +332,10 @@ bool (LuauVM::lua_isnumberx)(int index) {
 
 bool LuauVM::lua_isstring(int index) {
 	return ::lua_isstring(L, index);
+}
+
+bool (LuauVM::lua_isvector)(int index) {
+    return lua_type(index) == LUA_TVECTOR;
 }
 
 bool (LuauVM::lua_istable)(int index) {
@@ -603,6 +607,10 @@ Vector3 LuauVM::luaL_checkvector(int narg) {
     return Vector3(v[0], v[1], v[2]);
 }
 #endif
+
+bool LuauVM::lua_isvalidobject(int index) {
+    return ::lua_isvalidobject(L, index);
+}
 
 Object *LuauVM::luaL_checkobject(int narg, bool valid) {
     return ::luaL_checkobject(L, narg, valid);

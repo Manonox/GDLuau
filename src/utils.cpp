@@ -1,7 +1,7 @@
 #include <utils.h>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/callable.hpp>
-#include <classes/luau_function.h>
+// #include <classes/luau_function.h>
 
 
 
@@ -58,7 +58,7 @@ void lua_pushvariant(lua_State *L, const godot::Variant &var) {
 
         case godot::Variant::Type::CALLABLE: {
             godot::Callable c = var.operator godot::Callable();
-            lua_pushcallable(L, c);
+            lua_pushcallable(L, c, godot::String());
             break;
         }
 
@@ -96,7 +96,11 @@ void lua_pushdictionary(lua_State *L, const godot::Dictionary &dict) {
         godot::Variant value = dict[key];
         
         lua_pushvariant(L, key);
-        lua_pushvariant(L, value);
+        if ((key.get_type() == godot::Variant::STRING || key.get_type() == godot::Variant::STRING_NAME) && value.get_type() == godot::Variant::CALLABLE) {
+            lua_pushcallable(L, value.operator godot::Callable(), key.operator godot::String());
+        } else {
+            lua_pushvariant(L, value);
+        }
         lua_rawset(L, -3);
     }
 }
@@ -214,7 +218,8 @@ bool luaL_isarray(lua_State *L, int idx) {
 
 typedef struct CallableWrapped {
     int64_t object_id;
-    const char32_t *method;
+    char method[257];
+    char debugname[129];
 } CallableWrapped;
 
 int lua_pushcallable_method(lua_State *L) {
@@ -232,11 +237,13 @@ int lua_pushcallable_method(lua_State *L) {
         return 0;
     }
     
-    int nresults = object_p->callv(p_callablewrapped->method, godot::Array()); // Work-around, can't use 'call' for some reason
+    auto arr = godot::Array();
+    arr.push_back(lua_getnode(L));
+    int nresults = object_p->callv(p_callablewrapped->method, arr); // Work-around, can't use 'call' for some reason
     return nresults;
 }
 
-void lua_pushcallable(lua_State *L, const godot::Callable &callable) {
+void lua_pushcallable(lua_State *L, const godot::Callable &callable, const godot::String &debugname) {
     if (callable.is_custom()) {
         godot::UtilityFunctions::push_warning("[GDLUAU] Custom Callables not implemented");
         lua_pushnil(L);
@@ -251,8 +258,36 @@ void lua_pushcallable(lua_State *L, const godot::Callable &callable) {
 
     CallableWrapped *p_callablewrapped = (CallableWrapped *)lua_newuserdata(L, sizeof(CallableWrapped));
     p_callablewrapped->object_id = callable.get_object_id();
-    p_callablewrapped->method = callable.get_method().c_escape().ptr();
-    lua_pushcclosure(L, lua_pushcallable_method, NULL, 1);
+    
+    {
+        auto method = (godot::String) callable.get_method();
+
+        const int max_length = 257;
+        auto length = method.ascii().length();
+        if (length > max_length) {
+            length = max_length;
+            godot::UtilityFunctions::push_error("Too long method name");
+        }
+
+        auto src = method.to_ascii_buffer();
+
+        for (int i = 0; i < length; i++)
+            p_callablewrapped->method[i] = src[i];
+        p_callablewrapped->method[length] = '\0';
+    }
+
+    {
+        const int max_length = 129;
+        auto length = debugname.ascii().length();
+        length = length > max_length ? max_length : length;
+        auto src = debugname.to_ascii_buffer();
+
+        for (int i = 0; i < length; i++)
+            p_callablewrapped->debugname[i] = src[i];
+        p_callablewrapped->debugname[length] = '\0';
+    }
+
+    lua_pushcclosure(L, lua_pushcallable_method, p_callablewrapped->debugname, 1);
 }
 
 
@@ -305,6 +340,13 @@ int lua_isobject(lua_State *L, int idx) {
     return 1;
 }
 
+
+bool lua_isvalidobject(lua_State *L, int idx) {
+    ObjectWrapped *p_nodewrapped = (ObjectWrapped *)luaL_checkudata(L, idx, "object");
+    godot::Object *object = godot::ObjectDB::get_instance(p_nodewrapped->object_id);
+    return object != NULL;
+}
+
 godot::Object *luaL_checkobject(lua_State *L, int idx, bool valid) {
     ObjectWrapped *p_nodewrapped = (ObjectWrapped *)luaL_checkudata(L, idx, "object");
     godot::Object *object = godot::ObjectDB::get_instance(p_nodewrapped->object_id);
@@ -315,3 +357,20 @@ godot::Object *luaL_checkobject(lua_State *L, int idx, bool valid) {
 }
 
 
+void lua_setnode(lua_State* L, godot::LuauVM* node) {
+    lua_pushstring(L, GDLUAU_REGISTRY_NODE_KEY);
+    lua_pushlightuserdata(L, node);
+    lua_settable(L, LUA_REGISTRYINDEX);
+}
+
+godot::LuauVM* lua_getnode(lua_State* L) {
+    lua_pushstring(L, GDLUAU_REGISTRY_NODE_KEY);
+    lua_gettable(L, LUA_REGISTRYINDEX);
+    if (!lua_islightuserdata(L, -1)) {
+        lua_pop(L, 1);
+        return nullptr;
+    }
+    void *userdata = lua_tolightuserdata(L, -1);
+    lua_pop(L, 1);
+    return reinterpret_cast<godot::LuauVM*>(userdata);
+}
