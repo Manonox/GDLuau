@@ -127,7 +127,11 @@ public:
     int64_t (lua_tointeger)(int index);
     double (lua_tonumber)(int index);
     String (lua_tostring)(int index);
+#if LUA_VECTOR_SIZE == 4
+    Vector4 lua_tovector(int index);
+#else
     Vector3 lua_tovector(int index);
+#endif
     int lua_type(int index);
     String lua_typename(int type);
     String lua_getupvalue(int index, int n);
@@ -157,7 +161,11 @@ public:
     int luaL_checkint(int narg);
     double luaL_checknumber(int narg);
     String(luaL_checkstring)(int narg);
+#if LUA_VECTOR_SIZE == 4
+    Vector4 luaL_checkvector(int narg);
+#else
     Vector3 luaL_checkvector(int narg);
+#endif
     bool lua_isvalidobject(int index);
     Object *luaL_checkobject(int narg, bool valid);
     void luaL_checktype(int narg, int type);

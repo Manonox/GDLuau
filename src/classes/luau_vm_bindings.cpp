@@ -488,10 +488,17 @@ String (LuauVM::lua_tostring)(int index) {
 	return String(::lua_tostring(L, index));
 }
 
+#if LUA_VECTOR_SIZE == 4
+Vector4 LuauVM::lua_tovector(int index) {
+    const float* vec = ::lua_tovector(L, index);
+    return Vector4(vec[0], vec[1], vec[2], vec[3]);
+}
+#else
 Vector3 LuauVM::lua_tovector(int index) {
     const float* vec = ::lua_tovector(L, index);
     return Vector3(vec[0], vec[1], vec[2]);
 }
+#endif
 
 int LuauVM::lua_type(int index) {
     return ::lua_type(L, index);

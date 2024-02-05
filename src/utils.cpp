@@ -34,25 +34,25 @@ void lua_pushvariant(lua_State *L, const godot::Variant &var) {
 
         case godot::Variant::Type::VECTOR2: {
             godot::Vector2 v = var.operator godot::Vector2();
-            lua_pushvector(L, v.x, v.y, 0.0f);
+            lua_pushvector(L, v.x, v.y, 0.0f, 0.0f);
             break;
         }
 
         case godot::Variant::Type::VECTOR2I: {
             godot::Vector2i v = var.operator godot::Vector2i();
-            lua_pushvector(L, (float)v.x, (float)v.y, 0.0f);
+            lua_pushvector(L, (float)v.x, (float)v.y, 0.0f, 0.0f);
             break;
         }
 
         case godot::Variant::Type::VECTOR3: {
             godot::Vector3 v = var.operator godot::Vector3();
-            lua_pushvector(L, v.x, v.y, v.z);
+            lua_pushvector(L, v.x, v.y, v.z, 0.0f);
             break;
         }
 
         case godot::Variant::Type::VECTOR3I: {
             godot::Vector3i v = var.operator godot::Vector3i();
-            lua_pushvector(L, v.x, v.y, v.z);
+            lua_pushvector(L, v.x, v.y, v.z, 0.0f);
             break;
         }
 
