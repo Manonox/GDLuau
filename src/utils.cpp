@@ -222,6 +222,7 @@ typedef struct CallableWrapped {
     char debugname[129];
 } CallableWrapped;
 
+// static godot::Array arr;
 int lua_pushcallable_method(lua_State *L) {
     CallableWrapped *p_callablewrapped = (CallableWrapped *)lua_touserdata(L, lua_upvalueindex(1));
     
@@ -237,9 +238,12 @@ int lua_pushcallable_method(lua_State *L) {
         return 0;
     }
     
-    auto arr = godot::Array();
-    arr.push_back(lua_getnode(L));
-    int nresults = object_p->callv(p_callablewrapped->method, arr); // Work-around, can't use 'call' for some reason
+    godot::LuauVM* vm = lua_getnode(L);
+
+    // arr.clear();
+    // arr.push_back(vm);
+    int nresults = object_p->call(p_callablewrapped->method, vm);
+    // int nresults = object_p->callv(p_callablewrapped->method, arr); // Work-around, can't use 'call' for some reason
     return nresults;
 }
 
