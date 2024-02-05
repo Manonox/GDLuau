@@ -8,6 +8,7 @@
 
 #include <classes/luau_function.h>
 #include <vector_lib.h>
+#include <chrono>
 
 
 
@@ -18,6 +19,7 @@ class LuauVM : public Node {
 
 private:
     lua_State* L;
+
     void create_metatables();
 
 protected:
@@ -27,6 +29,12 @@ protected:
 public:
     LuauVM();
     ~LuauVM();
+    
+    double interrupt_cooldown = 0.1;
+    std::chrono::system_clock::time_point last_interrupt_time;
+
+    void set_interrupt_cooldown(const double p_interrupt_cooldown);
+    double get_interrupt_cooldown();
 
     void register_print();
 

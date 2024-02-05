@@ -44,17 +44,40 @@ static lua_CompileOptions luau_vm_compile_options = {
     // const char** mutableGlobals;
 };
 
+using ms = std::chrono::duration<double, std::milli>;
+void luau_vm_interrupt_method(lua_State* L, int gc) {
+    LuauVM *node = lua_getnode(L);
+    double cooldown = node->interrupt_cooldown;
+    auto now = std::chrono::system_clock::now();
+    
+    double time = ms(now - node->last_interrupt_time).count() / 1000.0;
+    if (time < cooldown) return;
+    node->last_interrupt_time = now;
+    node->emit_signal("interrupt");
+}
+
+
 LuauVM::LuauVM() {
     L = lua_newstate(lua_alloc, nullptr);
     lua_setnode(L, this);
     create_metatables();
+
+    lua_callbacks(L)->interrupt = luau_vm_interrupt_method;
 }
+
+void LuauVM::set_interrupt_cooldown(const double p_interrupt_cooldown) { interrupt_cooldown = p_interrupt_cooldown; }
+double LuauVM::get_interrupt_cooldown() { return interrupt_cooldown; }
+
 
 LuauVM::~LuauVM() {
     lua_close(L);
 }
 
 void LuauVM::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_interrupt_cooldown"), &LuauVM::get_interrupt_cooldown);
+	ClassDB::bind_method(D_METHOD("set_interrupt_cooldown", "p_interrupt_cooldown"), &LuauVM::set_interrupt_cooldown);
+    ClassDB::add_property("LuauVM", PropertyInfo(Variant::FLOAT, "interrupt_cooldown"), "set_interrupt_cooldown", "get_interrupt_cooldown");
+
     ClassDB::bind_method(D_METHOD("load_string", "code", "chunkname"), &LuauVM::load_string, DEFVAL("loadstring"));
     ClassDB::bind_method(D_METHOD("do_string", "code", "chunkname"), &LuauVM::do_string, DEFVAL("dostring"));
 
@@ -64,6 +87,7 @@ void LuauVM::_bind_methods() {
     _bind_passthrough_methods();
 
     ADD_SIGNAL(MethodInfo("stdout", PropertyInfo(Variant::STRING, "message")));
+    ADD_SIGNAL(MethodInfo("interrupt"));
 }
 
 int metatable_object__eq(lua_State *L) {
