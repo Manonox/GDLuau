@@ -2,7 +2,3 @@
 	path = godot-cpp
 	url = https://github.com/godotengine/godot-cpp.git
 	branch = master
-[submodule "luau"]
-	path = luau
-	url = https://github.com/luau-lang/luau.git
-	ignore = all
