@@ -1,22 +1,39 @@
-# godot-cpp template
-This repository serves as a quickstart template for GDExtension development with Godot 4.0+.
+# GDLuau
+A GDExtension that adds [Luau](https://luau-lang.org) C/C++ API bindings to GDScript
+*(+ some extras)*
 
-## Contents
-* An empty Godot project (`demo/`)
-* godot-cpp as a submodule (`godot-cpp/`)
-* GitHub Issues template (`.github/ISSUE_TEMPLATE.yml`)
-* GitHub CI/CD to publish your library packages when creating a release (`.github/workflows/builds.yml`)
-* preconfigured source files for C++ development of the GDExtension (`src/`)
+> **Warning**
+>
+> This repository's `main` branch is only usable with
+> [GDExtension](https://godotengine.org/article/introducing-gd-extensions)
+> from Godot's `master` branch.
 
-## Usage
-To use this template, log in to github and click the green "Use this template" button at the top of the repository page.
-This will let you create a copy of this repository with a clean git history. Make sure you clone the correct branch as these are configured for development of their respective Godot development branches and differ from each other. Refer to the docs to see what changed between the versions.
+About
+-----
+GDLuau is for in-game scripting / UGC / modding.
+*(This is **not** a replacement for or an alternative to GDScript.)*
 
-For getting started after cloning your own copy to your local machine, you should: 
-* initialize the godot-cpp git submodule via `git submodule update --init`
-* change the name of your library
-  * change the name of the compiled library file inside the `SConstruct` file by modifying the `libname` string.
-  * change the pathnames of the to be loaded library name inside the `demo/bin/example.gdextension` file. By replacing `libgdexample` to the name specified in your `SConstruct` file.
-  * change the name of the `demo/bin/example.gdextension` file
-* change the `entry_symbol` string inside your `demo/bin/your-extension.gdextension` file to be configured for your GDExtension name. This should be the same as the `GDExtensionBool GDE_EXPORT` external C function. As the name suggests, this sets the entry function for your GDExtension to be loaded by the Godot editors C API.
-* register the classes you want Godot to interact with inside the `register_types.cpp` file in the initialization method (here `initialize_gdextension_types`) in the syntax `ClassDB::register_class<CLASS-NAME>();`.
+Luau API closely follows Lua 5.1 API, you can find the manual [here](https://www.lua.org/manual/5.1/manual.html).<br />
+For coding in lua/luau take a look at the ["Getting Started" section](https://luau-lang.org/getting-started) on [luau-lang.org](https://luau-lang.org).<br />
+
+
+Features
+--------
+- Full C/C++ API in GDScript excluding lightuserdata/userdata
+- Pushing/Pulling normal Callables (lambda Callables aren't supported)
+- Pushing/Pulling Objects (Node / RefCounted) (as userdata)
+- Pushing/Pulling Godot Arrays and Dictionaries
+- Pushing/Pulling Godot Vector4s as Luau vectors
+- Custom print implementation that emits a signal
+- lua_loadstring, lua_dostring in GDScript (were "missing" in Luau)
+- Configurable interrupt signal for run-away scripts (`while true do end`)
+
+
+Compiling
+------------
+- Clone the repo
+- Run `scons platform=<platform>` (also, preferably, add `use_mingw=yes`, if you have it installed)
+- [A test project is included in the repo](https://github.com/Manonox/GDLuau/tree/master/demo)
+
+---------------
+[![lua logo](https://luau-lang.org/assets/images/luau.png)](https://luau-lang.org)<br />
