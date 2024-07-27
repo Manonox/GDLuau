@@ -2,11 +2,26 @@ extends Node
 
 
 @onready var vm : LuauVM = $LuauVM
+@export var sandboxed := true
 
 func _ready():
 	print("================")
 
-	vm.open_all_libraries()
+	if not sandboxed:
+		vm.open_all_libraries()
+	else:
+		vm.open_libraries([
+			"", # Base
+			"coroutine",
+			"table",
+			"string",
+			"utf8",
+			"math",
+			# "os", # This will exclude time functions as well
+			"bit32",
+			"buffer",
+			# "debug"
+		])
 	
 	vm.lua_pushobject(self)
 	vm.lua_setfield(vm.LUA_GLOBALSINDEX, "node")
