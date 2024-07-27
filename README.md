@@ -31,7 +31,7 @@ Features
 
 Compiling
 ------------
-- Clone the repo
+- Clone the repo with `--recursive` to also clone submodules
 - Run `scons platform=<platform>` (also, preferably, add `use_mingw=yes`, if you have it installed)
 - [A test project is included in the repo](https://github.com/Manonox/GDLuau/tree/master/demo)
 
