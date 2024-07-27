@@ -11,16 +11,16 @@ func _ready():
 		vm.open_all_libraries()
 	else:
 		vm.open_libraries([
-			"", # Base
+			"", # Base library, contains functions like print and tostring
 			"coroutine",
 			"table",
 			"string",
 			"utf8",
 			"math",
-			# "os", # This will exclude time functions as well
+			#"os", # This will exclude time functions as well
 			"bit32",
-			"buffer",
-			# "debug"
+			"buffer"
+			#"debug"
 		])
 	
 	vm.lua_pushobject(self)
