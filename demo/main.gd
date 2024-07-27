@@ -2,12 +2,12 @@ extends Node
 
 
 @onready var vm : LuauVM = $LuauVM
-@export var sandboxed := true
+@export var open_all_libraries := true
 
 func _ready():
 	print("================")
 
-	if not sandboxed:
+	if open_all_libraries:
 		vm.open_all_libraries()
 	else:
 		vm.open_libraries([
@@ -17,10 +17,10 @@ func _ready():
 			"string",
 			"utf8",
 			"math",
-			#"os", # This will exclude time functions as well
+			"os",
 			"bit32",
-			"buffer"
-			#"debug"
+			"buffer",
+			"debug"
 		])
 	
 	vm.lua_pushobject(self)
