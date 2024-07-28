@@ -196,11 +196,11 @@ static const luaL_Reg lualibs[] = {
 };
 
 
-void LuauVM::open_libraries(const PackedStringArray &libraries) {
+void LuauVM::open_libraries(const PackedInt32Array &libraries) {
     const luaL_Reg* lib = lualibs;
     for (; lib->func; lib++)
     {
-        if (!libraries.has(lib->name))
+        if (!libraries.has(lib - lualibs))
             continue;
         lua_pushcfunction(L, lib->func, NULL);
         lua_pushstring(lib->name);

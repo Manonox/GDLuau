@@ -10,6 +10,18 @@
 #include <vector_lib.h>
 #include <chrono>
 
+enum lua_Lib {
+    LUA_LIB_BASE = 0,
+    LUA_LIB_COROUTINE,
+    LUA_LIB_TABLE,
+    LUA_LIB_OS,
+    LUA_LIB_STRING,
+    LUA_LIB_MATH,
+    LUA_LIB_VECTOR,
+    LUA_LIB_DEBUG,
+    LUA_LIB_UTF8,
+    LUA_LIB_BIT32
+};
 
 
 namespace godot {
@@ -41,7 +53,7 @@ public:
     int load_string(const String &code, const String &chunkname);
     int do_string(const String &code, const String &chunkname);
 
-    void open_libraries(const PackedStringArray &libraries);
+    void open_libraries(const PackedInt32Array &libraries);
     void open_all_libraries();
 
     int64_t get_memory_usage_bytes();
@@ -187,6 +199,7 @@ public:
 
 VARIANT_ENUM_CAST(lua_Status);
 VARIANT_ENUM_CAST(lua_Type);
+VARIANT_ENUM_CAST(lua_Lib);
 VARIANT_ENUM_CAST(lua_GCOp);
 
 int luaopen_vector(lua_State *L);
