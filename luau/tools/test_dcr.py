@@ -6,9 +6,17 @@ import os.path
 import subprocess as sp
 import sys
 import xml.sax as x
-import colorama as c
 
-c.init()
+try:
+    import colorama as c
+except ImportError:
+    class c:
+        class Fore:
+            RED=''
+            RESET=''
+            GREEN=''
+else:
+    c.init()
 
 SCRIPT_PATH = os.path.split(sys.argv[0])[0]
 FAIL_LIST_PATH = os.path.join(SCRIPT_PATH, "faillist.txt")
@@ -108,12 +116,6 @@ def main():
         help="Write a new faillist.txt after running tests.",
     )
     parser.add_argument(
-        "--rwp",
-        dest="rwp",
-        action="store_true",
-        help="Run the tests with read-write properties enabled.",
-    )
-    parser.add_argument(
         "--ts",
         dest="suite",
         action="store",
@@ -135,8 +137,6 @@ def main():
     failList = loadFailList()
 
     flags = ["true", "DebugLuauDeferredConstraintResolution"]
-    if args.rwp:
-        flags.append("DebugLuauReadWriteProperties")
 
     commandLine = [args.path, "--reporters=xml", "--fflags=" + ",".join(flags)]
 

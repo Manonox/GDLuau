@@ -4,6 +4,7 @@
 #include "Luau/AssemblyBuilderX64.h"
 #include "Luau/UnwindBuilder.h"
 
+#include "CodeGenContext.h"
 #include "NativeState.h"
 #include "EmitCommonX64.h"
 
@@ -180,15 +181,15 @@ static EntryLocations buildEntryFunction(AssemblyBuilderX64& build, UnwindBuilde
     build.ret();
 
     // Our entry function is special, it spans the whole remaining code area
-    unwind.finishFunction(build.getLabelOffset(locations.start), kFullBlockFuncton);
+    unwind.finishFunction(build.getLabelOffset(locations.start), kFullBlockFunction);
 
     return locations;
 }
 
-bool initHeaderFunctions(NativeState& data)
+bool initHeaderFunctions(BaseCodeGenContext& codeGenContext)
 {
     AssemblyBuilderX64 build(/* logText= */ false);
-    UnwindBuilder& unwind = *data.unwindBuilder.get();
+    UnwindBuilder& unwind = *codeGenContext.unwindBuilder.get();
 
     unwind.startInfo(UnwindBuilder::X64);
 
@@ -198,13 +199,13 @@ bool initHeaderFunctions(NativeState& data)
 
     unwind.finishInfo();
 
-    LUAU_ASSERT(build.data.empty());
+    CODEGEN_ASSERT(build.data.empty());
 
     uint8_t* codeStart = nullptr;
-    if (!data.codeAllocator.allocate(
-            build.data.data(), int(build.data.size()), build.code.data(), int(build.code.size()), data.gateData, data.gateDataSize, codeStart))
+    if (!codeGenContext.codeAllocator.allocate(build.data.data(), int(build.data.size()), build.code.data(), int(build.code.size()),
+            codeGenContext.gateData, codeGenContext.gateDataSize, codeStart))
     {
-        LUAU_ASSERT(!"Failed to create entry function");
+        CODEGEN_ASSERT(!"Failed to create entry function");
         return false;
     }
 
@@ -212,8 +213,8 @@ bool initHeaderFunctions(NativeState& data)
     // specified by the unwind information of the entry function
     unwind.setBeginOffset(build.getLabelOffset(entryLocations.prologueEnd));
 
-    data.context.gateEntry = codeStart + build.getLabelOffset(entryLocations.start);
-    data.context.gateExit = codeStart + build.getLabelOffset(entryLocations.epilogueStart);
+    codeGenContext.context.gateEntry = codeStart + build.getLabelOffset(entryLocations.start);
+    codeGenContext.context.gateExit = codeStart + build.getLabelOffset(entryLocations.epilogueStart);
 
     return true;
 }

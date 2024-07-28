@@ -1,6 +1,7 @@
 // This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
 #include "Luau/AssemblyBuilderA64.h"
 #include "Luau/StringUtils.h"
+#include "ScopedFlags.h"
 
 #include "doctest.h"
 
@@ -218,6 +219,7 @@ TEST_CASE_FIXTURE(AssemblyBuilderA64Fixture, "Moves")
 {
     SINGLE_COMPARE(mov(x0, x1), 0xAA0103E0);
     SINGLE_COMPARE(mov(w0, w1), 0x2A0103E0);
+    SINGLE_COMPARE(mov(q0, q1), 0x4EA11C20);
 
     SINGLE_COMPARE(movz(x0, 42), 0xD2800540);
     SINGLE_COMPARE(movz(w0, 42), 0x52800540);
@@ -367,11 +369,16 @@ TEST_CASE_FIXTURE(AssemblyBuilderA64Fixture, "FPMath")
 {
     SINGLE_COMPARE(fabs(d1, d2), 0x1E60C041);
     SINGLE_COMPARE(fadd(d1, d2, d3), 0x1E632841);
+    SINGLE_COMPARE(fadd(s29, s29, s28), 0x1E3C2BBD);
     SINGLE_COMPARE(fdiv(d1, d2, d3), 0x1E631841);
+    SINGLE_COMPARE(fdiv(s29, s29, s28), 0x1E3C1BBD);
     SINGLE_COMPARE(fmul(d1, d2, d3), 0x1E630841);
+    SINGLE_COMPARE(fmul(s29, s29, s28), 0x1E3C0BBD);
     SINGLE_COMPARE(fneg(d1, d2), 0x1E614041);
+    SINGLE_COMPARE(fneg(s30, s30), 0x1E2143DE);
     SINGLE_COMPARE(fsqrt(d1, d2), 0x1E61C041);
     SINGLE_COMPARE(fsub(d1, d2, d3), 0x1E633841);
+    SINGLE_COMPARE(fsub(s29, s29, s28), 0x1E3C3BBD);
 
     SINGLE_COMPARE(frinta(d1, d2), 0x1E664041);
     SINGLE_COMPARE(frintm(d1, d2), 0x1E654041);
@@ -426,6 +433,14 @@ TEST_CASE_FIXTURE(AssemblyBuilderA64Fixture, "FPLoadStore")
     SINGLE_COMPARE(str(s0, mem(x1, 16)), 0xBD001020);
 }
 
+TEST_CASE_FIXTURE(AssemblyBuilderA64Fixture, "FPInsertExtract")
+{
+    SINGLE_COMPARE(ins_4s(q29, w17, 3), 0x4E1C1E3D);
+    SINGLE_COMPARE(ins_4s(q31, 0, q29, 0), 0x6E0407BF);
+    SINGLE_COMPARE(dup_4s(s29, q31, 2), 0x5E1407FD);
+    SINGLE_COMPARE(dup_4s(q29, q30, 0), 0x4E0407DD);
+}
+
 TEST_CASE_FIXTURE(AssemblyBuilderA64Fixture, "FPCompare")
 {
     SINGLE_COMPARE(fcmp(d0, d1), 0x1E612000);
@@ -437,6 +452,12 @@ TEST_CASE_FIXTURE(AssemblyBuilderA64Fixture, "FPImm")
     SINGLE_COMPARE(fmov(d0, 0), 0x2F00E400);
     SINGLE_COMPARE(fmov(d0, 0.125), 0x1E681000);
     SINGLE_COMPARE(fmov(d0, -0.125), 0x1E781000);
+    SINGLE_COMPARE(fmov(d0, 1.9375), 0x1E6FF000);
+
+    SINGLE_COMPARE(fmov(q0, 0), 0x4F000400);
+    SINGLE_COMPARE(fmov(q0, 0.125), 0x4F02F400);
+    SINGLE_COMPARE(fmov(q0, -0.125), 0x4F06F400);
+    SINGLE_COMPARE(fmov(q0, 1.9375), 0x4F03F7E0);
 
     CHECK(!AssemblyBuilderA64::isFmovSupported(-0.0));
     CHECK(!AssemblyBuilderA64::isFmovSupported(0.12389));
@@ -488,6 +509,15 @@ TEST_CASE_FIXTURE(AssemblyBuilderA64Fixture, "PrePostIndexing")
     SINGLE_COMPARE(str(q0, mem(x1, 1, AddressKindA64::post)), 0x3C801420);
 }
 
+TEST_CASE_FIXTURE(AssemblyBuilderA64Fixture, "SIMDMath")
+{
+    SINGLE_COMPARE(fadd(q0, q1, q2), 0x4E22D420);
+    SINGLE_COMPARE(fsub(q0, q1, q2), 0x4EA2D420);
+    SINGLE_COMPARE(fmul(q0, q1, q2), 0x6E22DC20);
+    SINGLE_COMPARE(fdiv(q0, q1, q2), 0x6E22FC20);
+    SINGLE_COMPARE(fneg(q0, q1), 0x6EA0F820);
+}
+
 TEST_CASE("LogTest")
 {
     AssemblyBuilderA64 build(/* logText= */ true);
@@ -535,6 +565,12 @@ TEST_CASE("LogTest")
 
     build.add(x1, x2, w3, 3);
 
+    build.ins_4s(q29, w17, 3);
+    build.ins_4s(q31, 1, q29, 2);
+    build.dup_4s(s29, q31, 2);
+    build.dup_4s(q29, q30, 0);
+    build.fmul(q0, q1, q2);
+
     build.setLabel(l);
     build.ret();
 
@@ -572,6 +608,11 @@ TEST_CASE("LogTest")
  ldr         x0,[x1,#1]!
  ldr         x0,[x1]!,#1
  add         x1,x2,w3 UXTW #3
+ ins         v29.s[3],w17
+ ins         v31.s[1],v29.s[2]
+ dup         s29,v31.s[2]
+ dup         v29.4s,v30.s[0]
+ fmul        v0.4s,v1.4s,v2.4s
 .L1:
  ret
 )";

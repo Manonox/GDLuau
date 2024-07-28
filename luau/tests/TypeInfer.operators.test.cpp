@@ -264,7 +264,7 @@ TEST_CASE_FIXTURE(Fixture, "cannot_indirectly_compare_types_that_do_not_have_a_m
 
     if (FFlag::DebugLuauDeferredConstraintResolution)
     {
-        UninhabitedTypeFamily* utf = get<UninhabitedTypeFamily>(result.errors[0]);
+        UninhabitedTypeFunction* utf = get<UninhabitedTypeFunction>(result.errors[0]);
         REQUIRE(utf);
         REQUIRE_EQ(toString(utf->ty), "lt<a, b>");
     }
@@ -294,7 +294,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "cannot_indirectly_compare_types_that_do_not_
 
     if (FFlag::DebugLuauDeferredConstraintResolution)
     {
-        UninhabitedTypeFamily* utf = get<UninhabitedTypeFamily>(result.errors[0]);
+        UninhabitedTypeFunction* utf = get<UninhabitedTypeFunction>(result.errors[0]);
         REQUIRE(utf);
         REQUIRE_EQ(toString(utf->ty), "lt<M, M>");
     }
@@ -396,9 +396,17 @@ TEST_CASE_FIXTURE(Fixture, "compound_assign_mismatch_result")
         s += 10
     )");
 
-    LUAU_REQUIRE_ERROR_COUNT(2, result);
-    CHECK_EQ(result.errors[0], (TypeError{Location{{2, 8}, {2, 9}}, TypeMismatch{builtinTypes->numberType, builtinTypes->stringType}}));
-    CHECK_EQ(result.errors[1], (TypeError{Location{{2, 8}, {2, 15}}, TypeMismatch{builtinTypes->stringType, builtinTypes->numberType}}));
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+    {
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+        CHECK_EQ(result.errors[0], (TypeError{Location{{2, 8}, {2, 9}}, TypeMismatch{builtinTypes->numberType, builtinTypes->stringType}}));
+    }
+    else
+    {
+        LUAU_REQUIRE_ERROR_COUNT(2, result);
+        CHECK_EQ(result.errors[0], (TypeError{Location{{2, 8}, {2, 9}}, TypeMismatch{builtinTypes->numberType, builtinTypes->stringType}}));
+        CHECK_EQ(result.errors[1], (TypeError{Location{{2, 8}, {2, 15}}, TypeMismatch{builtinTypes->stringType, builtinTypes->numberType}}));
+    }
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "compound_assign_metatable")
@@ -421,6 +429,33 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "compound_assign_metatable")
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "compound_assign_metatable_with_changing_return_type")
+{
+    ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, true};
+
+    CheckResult result = check(R"(
+        --!strict
+        type T = { x: number }
+        local MT = {}
+
+        function MT:__add(other): number
+            return 112
+        end
+
+        local t = setmetatable({x = 2}, MT)
+        local u = t + 3
+        t += 3
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+
+    TypeMismatch* tm = get<TypeMismatch>(result.errors[0]);
+    REQUIRE(tm);
+
+    CHECK("t" == toString(tm->wantedType));
+    CHECK("number" == toString(tm->givenType));
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "compound_assign_result_must_be_compatible_with_var")
@@ -522,7 +557,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "typecheck_unary_minus")
     {
         LUAU_REQUIRE_ERROR_COUNT(2, result);
 
-        UninhabitedTypeFamily* utf = get<UninhabitedTypeFamily>(result.errors[0]);
+        UninhabitedTypeFunction* utf = get<UninhabitedTypeFunction>(result.errors[0]);
         REQUIRE(utf);
         CHECK_EQ(toString(utf->ty), "unm<bar>");
 
@@ -710,7 +745,7 @@ TEST_CASE_FIXTURE(Fixture, "strict_binary_op_where_lhs_unknown")
     if (FFlag::DebugLuauDeferredConstraintResolution)
     {
         LUAU_REQUIRE_ERROR_COUNT(ops.size(), result);
-        CHECK_EQ("Type family instance Add<a, b> depends on generic function parameters but does not appear in the function signature; this "
+        CHECK_EQ("Type function instance Add<a, b> depends on generic function parameters but does not appear in the function signature; this "
                  "construct cannot be type-checked at this time",
             toString(result.errors[0]));
         CHECK_EQ("Unknown type used in - operation; consider adding a type annotation to 'a'", toString(result.errors[1]));
@@ -732,7 +767,11 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "and_binexps_dont_unify")
     end
     )");
 
-    LUAU_REQUIRE_NO_ERRORS(result);
+    // This infers a type for `t` of `{unknown}`, and so it makes sense that `t[1].test` would error.
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+    else
+        LUAU_REQUIRE_NO_ERRORS(result);
 }
 
 TEST_CASE_FIXTURE(Fixture, "error_on_invalid_operand_types_to_relational_operators")
@@ -747,7 +786,7 @@ TEST_CASE_FIXTURE(Fixture, "error_on_invalid_operand_types_to_relational_operato
 
     if (FFlag::DebugLuauDeferredConstraintResolution)
     {
-        UninhabitedTypeFamily* utf = get<UninhabitedTypeFamily>(result.errors[0]);
+        UninhabitedTypeFunction* utf = get<UninhabitedTypeFunction>(result.errors[0]);
         REQUIRE(utf);
         REQUIRE_EQ(toString(utf->ty), "lt<boolean, boolean>");
     }
@@ -778,7 +817,7 @@ TEST_CASE_FIXTURE(Fixture, "error_on_invalid_operand_types_to_relational_operato
 
     if (FFlag::DebugLuauDeferredConstraintResolution)
     {
-        UninhabitedTypeFamily* utf = get<UninhabitedTypeFamily>(result.errors[0]);
+        UninhabitedTypeFunction* utf = get<UninhabitedTypeFunction>(result.errors[0]);
         REQUIRE(utf);
         REQUIRE_EQ(toString(utf->ty), "lt<number | string, number | string>");
     }
@@ -1417,7 +1456,7 @@ return startsWith
     LUAU_REQUIRE_NO_ERRORS(result);
 }
 
-TEST_CASE_FIXTURE(Fixture, "add_type_family_works")
+TEST_CASE_FIXTURE(Fixture, "add_type_function_works")
 {
     if (!FFlag::DebugLuauDeferredConstraintResolution)
         return;
@@ -1433,8 +1472,8 @@ TEST_CASE_FIXTURE(Fixture, "add_type_family_works")
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
     CHECK(toString(requireType("a")) == "number");
-    CHECK(toString(requireType("b")) == "Add<string, string>");
-    CHECK(toString(result.errors[0]) == "Type family instance Add<string, string> is uninhabited");
+    CHECK(toString(requireType("b")) == "add<string, string>");
+    CHECK(toString(result.errors[0]) == "Operator '+' could not be applied to operands of types string and string; there is no corresponding overload for __add");
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "normalize_strings_comparison")
@@ -1472,6 +1511,24 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "compare_singleton_string_to_string")
         LUAU_REQUIRE_NO_ERRORS(result);
     else
         LUAU_REQUIRE_ERROR_COUNT(1, result);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "no_infinite_expansion_of_free_type" * doctest::timeout(1.0))
+{
+    ScopedFastFlag sff(FFlag::DebugLuauDeferredConstraintResolution, true);
+    check(R"(
+        local tooltip = {}
+
+        function tooltip:Show()
+            local playerGui = self.Player:FindFirstChild("PlayerGui")
+            for _,c in ipairs(playerGui:GetChildren()) do
+                if c:IsA("ScreenGui") and c.DisplayOrder > self.Gui.DisplayOrder then
+                end
+            end
+        end
+    )");
+
+    // just type-checking this code is enough
 }
 
 TEST_SUITE_END();

@@ -5,13 +5,12 @@
 #include "Luau/Def.h"
 #include "Luau/Common.h"
 #include "Luau/Error.h"
+#include "Luau/TimeTrace.h"
 
-#include <algorithm>
 #include <optional>
 
 LUAU_FASTFLAG(DebugLuauFreezeArena)
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
-LUAU_FASTFLAG(LuauLoopControlFlowAnalysis)
 
 namespace Luau
 {
@@ -138,6 +137,8 @@ bool DfgScope::canUpdateDefinition(DefId def, const std::string& key) const
 
 DataFlowGraph DataFlowGraphBuilder::build(AstStatBlock* block, NotNull<InternalErrorReporter> handle)
 {
+    LUAU_TIMETRACE_SCOPE("DataFlowGraphBuilder::build", "Typechecking");
+
     LUAU_ASSERT(FFlag::DebugLuauDeferredConstraintResolution);
 
     DataFlowGraphBuilder builder;
@@ -251,8 +252,12 @@ void DataFlowGraphBuilder::joinProps(DfgScope* result, const DfgScope& a, const 
 
 DefId DataFlowGraphBuilder::lookup(DfgScope* scope, Symbol symbol)
 {
+    // true if any of the considered scopes are a loop.
+    bool outsideLoopScope = false;
     for (DfgScope* current = scope; current; current = current->parent)
     {
+        outsideLoopScope = outsideLoopScope || current->scopeType == DfgScope::Loop;
+
         if (auto found = current->bindings.find(symbol))
             return NotNull{*found};
         else if (current->scopeType == DfgScope::Function)
@@ -260,7 +265,12 @@ DefId DataFlowGraphBuilder::lookup(DfgScope* scope, Symbol symbol)
             FunctionCapture& capture = captures[symbol];
             DefId captureDef = defArena->phi({});
             capture.captureDefs.push_back(captureDef);
-            scope->bindings[symbol] = captureDef;
+
+            // If we are outside of a loop scope, then we don't want to actually bind
+            // uses of `symbol` to this new phi node since it will not get populated.
+            if (!outsideLoopScope)
+                scope->bindings[symbol] = captureDef;
+
             return NotNull{captureDef};
         }
     }
@@ -394,7 +404,7 @@ ControlFlow DataFlowGraphBuilder::visit(DfgScope* scope, AstStatIf* i)
     else if ((thencf | elsecf) == ControlFlow::None)
         join(scope, thenScope, elseScope);
 
-    if (FFlag::LuauLoopControlFlowAnalysis && thencf == elsecf)
+    if (thencf == elsecf)
         return thencf;
     else if (matches(thencf, ControlFlow::Returns | ControlFlow::Throws) && matches(elsecf, ControlFlow::Returns | ControlFlow::Throws))
         return ControlFlow::Returns;
@@ -756,7 +766,8 @@ DataFlowResult DataFlowGraphBuilder::visitExpr(DfgScope* scope, AstExprCall* c)
     for (AstExpr* arg : c->args)
         visitExpr(scope, arg);
 
-    return {defArena->freshCell(), nullptr};
+    // calls should be treated as subscripted.
+    return {defArena->freshCell(/* subscripted */ true), nullptr};
 }
 
 DataFlowResult DataFlowGraphBuilder::visitExpr(DfgScope* scope, AstExprIndexName* i)

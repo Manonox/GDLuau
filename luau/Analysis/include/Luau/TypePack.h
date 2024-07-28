@@ -15,13 +15,13 @@ namespace Luau
 {
 
 struct TypeArena;
-struct TypePackFamily;
+struct TypePackFunction;
 struct TxnLog;
 
 struct TypePack;
 struct VariadicTypePack;
 struct BlockedTypePack;
-struct TypeFamilyInstanceTypePack;
+struct TypeFunctionInstanceTypePack;
 
 struct FreeTypePack
 {
@@ -55,7 +55,7 @@ using BoundTypePack = Unifiable::Bound<TypePackId>;
 using ErrorTypePack = Unifiable::Error;
 
 using TypePackVariant =
-    Unifiable::Variant<TypePackId, FreeTypePack, GenericTypePack, TypePack, VariadicTypePack, BlockedTypePack, TypeFamilyInstanceTypePack>;
+    Unifiable::Variant<TypePackId, FreeTypePack, GenericTypePack, TypePack, VariadicTypePack, BlockedTypePack, TypeFunctionInstanceTypePack>;
 
 /* A TypePack is a rope-like string of TypeIds.  We use this structure to encode
  * notions like packs of unknown length and packs of any length, as well as more
@@ -82,15 +82,17 @@ struct BlockedTypePack
     BlockedTypePack();
     size_t index;
 
+    struct Constraint* owner = nullptr;
+
     static size_t nextIndex;
 };
 
 /**
- * Analogous to a TypeFamilyInstanceType.
+ * Analogous to a TypeFunctionInstanceType.
  */
-struct TypeFamilyInstanceTypePack
+struct TypeFunctionInstanceTypePack
 {
-    NotNull<TypePackFamily> family;
+    NotNull<const TypePackFunction> function;
 
     std::vector<TypeId> typeArguments;
     std::vector<TypePackId> packArguments;
@@ -230,5 +232,19 @@ bool isVariadic(TypePackId tp, const TxnLog& log);
 bool isVariadicTail(TypePackId tp, const TxnLog& log, bool includeHiddenVariadics = false);
 
 bool containsNever(TypePackId tp);
+
+/*
+ * Use this to change the kind of a particular type pack.
+ *
+ * LUAU_NOINLINE so that the calling frame doesn't have to pay the stack storage for the new variant.
+ */
+template<typename T, typename... Args>
+LUAU_NOINLINE T* emplaceTypePack(TypePackVar* ty, Args&&... args)
+{
+    return &ty->ty.emplace<T>(std::forward<Args>(args)...);
+}
+
+template<>
+LUAU_NOINLINE Unifiable::Bound<TypePackId>* emplaceTypePack<BoundTypePack>(TypePackVar* ty, TypePackId& tyArg);
 
 } // namespace Luau

@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#if defined(_WIN32) && defined(_M_X64)
+#if defined(_WIN32) && defined(CODEGEN_TARGET_X64)
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -20,13 +20,13 @@
 #elif defined(__linux__) || defined(__APPLE__)
 
 // Defined in unwind.h which may not be easily discoverable on various platforms
-extern "C" void __register_frame(const void*);
-extern "C" void __deregister_frame(const void*);
+extern "C" void __register_frame(const void*) __attribute__((weak));
+extern "C" void __deregister_frame(const void*) __attribute__((weak));
 
 extern "C" void __unw_add_dynamic_fde() __attribute__((weak));
 #endif
 
-#if defined(__APPLE__) && defined(__aarch64__)
+#if defined(__APPLE__) && defined(CODEGEN_TARGET_A64)
 #include <sys/sysctl.h>
 #include <mach-o/loader.h>
 #include <dlfcn.h>
@@ -48,7 +48,7 @@ namespace Luau
 namespace CodeGen
 {
 
-#if defined(__APPLE__) && defined(__aarch64__)
+#if defined(__APPLE__) && defined(CODEGEN_TARGET_A64)
 static int findDynamicUnwindSections(uintptr_t addr, unw_dynamic_unwind_sections_t* info)
 {
     // Define a minimal mach header for JIT'd code.
@@ -102,30 +102,37 @@ void* createBlockUnwindInfo(void* context, uint8_t* block, size_t blockSize, siz
     UnwindBuilder* unwind = (UnwindBuilder*)context;
 
     // All unwinding related data is placed together at the start of the block
-    size_t unwindSize = unwind->getSize();
+    size_t unwindSize = unwind->getUnwindInfoSize(blockSize);
     unwindSize = (unwindSize + (kCodeAlignment - 1)) & ~(kCodeAlignment - 1); // Match code allocator alignment
-    LUAU_ASSERT(blockSize >= unwindSize);
+    CODEGEN_ASSERT(blockSize >= unwindSize);
 
     char* unwindData = (char*)block;
-    unwind->finalize(unwindData, unwindSize, block, blockSize);
+    [[maybe_unused]] size_t functionCount = unwind->finalize(unwindData, unwindSize, block, blockSize);
 
-#if defined(_WIN32) && defined(_M_X64)
-    if (!RtlAddFunctionTable((RUNTIME_FUNCTION*)block, uint32_t(unwind->getFunctionCount()), uintptr_t(block)))
+#if defined(_WIN32) && defined(CODEGEN_TARGET_X64)
+
+#if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP | WINAPI_PARTITION_SYSTEM)
+    if (!RtlAddFunctionTable((RUNTIME_FUNCTION*)block, uint32_t(functionCount), uintptr_t(block)))
     {
-        LUAU_ASSERT(!"Failed to allocate function table");
+        CODEGEN_ASSERT(!"Failed to allocate function table");
         return nullptr;
     }
+#endif
+
 #elif defined(__linux__) || defined(__APPLE__)
+    if (!__register_frame)
+        return nullptr;
+
     visitFdeEntries(unwindData, __register_frame);
 #endif
 
-#if defined(__APPLE__) && defined(__aarch64__)
+#if defined(__APPLE__) && defined(CODEGEN_TARGET_A64)
     // Starting from macOS 14, we need to register unwind section callback to state that our ABI doesn't require pointer authentication
     // This might conflict with other JITs that do the same; unfortunately this is the best we can do for now.
     static unw_add_find_dynamic_unwind_sections_t unw_add_find_dynamic_unwind_sections =
         unw_add_find_dynamic_unwind_sections_t(dlsym(RTLD_DEFAULT, "__unw_add_find_dynamic_unwind_sections"));
     static int regonce = unw_add_find_dynamic_unwind_sections ? unw_add_find_dynamic_unwind_sections(findDynamicUnwindSections) : 0;
-    LUAU_ASSERT(regonce == 0);
+    CODEGEN_ASSERT(regonce == 0);
 #endif
 
     beginOffset = unwindSize + unwind->getBeginOffset();
@@ -134,19 +141,32 @@ void* createBlockUnwindInfo(void* context, uint8_t* block, size_t blockSize, siz
 
 void destroyBlockUnwindInfo(void* context, void* unwindData)
 {
-#if defined(_WIN32) && defined(_M_X64)
+#if defined(_WIN32) && defined(CODEGEN_TARGET_X64)
+
+#if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP | WINAPI_PARTITION_SYSTEM)
     if (!RtlDeleteFunctionTable((RUNTIME_FUNCTION*)unwindData))
-        LUAU_ASSERT(!"Failed to deallocate function table");
+        CODEGEN_ASSERT(!"Failed to deallocate function table");
+#endif
+
 #elif defined(__linux__) || defined(__APPLE__)
+    if (!__deregister_frame)
+    {
+        CODEGEN_ASSERT(!"Cannot deregister unwind information");
+        return;
+    }
+
     visitFdeEntries((char*)unwindData, __deregister_frame);
 #endif
 }
 
 bool isUnwindSupported()
 {
-#if defined(_WIN32) && defined(_M_X64)
+#if defined(_WIN32) && defined(CODEGEN_TARGET_X64)
     return true;
-#elif defined(__APPLE__) && defined(__aarch64__)
+#elif defined(__ANDROID__)
+    // Current unwind information is not compatible with Android
+    return false;
+#elif defined(__APPLE__) && defined(CODEGEN_TARGET_A64)
     char ver[256];
     size_t verLength = sizeof(ver);
     // libunwind on macOS 12 and earlier (which maps to osrelease 21) assumes JIT frames use pointer authentication without a way to override that

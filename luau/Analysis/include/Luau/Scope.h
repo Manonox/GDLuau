@@ -45,6 +45,8 @@ struct Scope
 
     TypeLevel level;
 
+    Location location; // the spanning location associated with this scope
+
     std::unordered_map<Name, TypeFun> exportedTypeBindings;
     std::unordered_map<Name, TypeFun> privateTypeBindings;
     std::unordered_map<Name, Location> typeAliasLocations;
@@ -99,5 +101,13 @@ bool subsumesStrict(Scope* left, Scope* right);
 // same scope.  As in subsumesStrict(), nullptr is considered to be the
 // outermost-possible scope.
 bool subsumes(Scope* left, Scope* right);
+
+inline Scope* max(Scope* left, Scope* right)
+{
+    if (subsumes(left, right))
+        return right;
+    else
+        return left;
+}
 
 } // namespace Luau

@@ -6,6 +6,8 @@
 
 #include <stdexcept>
 
+LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
+
 namespace Luau
 {
 
@@ -267,6 +269,8 @@ TypePackId follow(TypePackId tp, const void* context, TypePackId (*mapper)(const
 
         if (const Unifiable::Bound<TypePackId>* btv = get<Unifiable::Bound<TypePackId>>(mapped))
             return btv->boundTo;
+        else if (const TypePack* tp = get<TypePack>(mapped); tp && tp->head.empty())
+            return tp->tail;
         else
             return std::nullopt;
     };
@@ -459,6 +463,13 @@ bool containsNever(TypePackId tp)
     }
 
     return false;
+}
+
+template<>
+LUAU_NOINLINE Unifiable::Bound<TypePackId>* emplaceTypePack<BoundTypePack>(TypePackVar* ty, TypePackId& tyArg)
+{
+    LUAU_ASSERT(ty != follow(tyArg));
+    return &ty->ty.emplace<BoundTypePack>(tyArg);
 }
 
 } // namespace Luau

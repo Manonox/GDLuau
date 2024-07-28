@@ -3,6 +3,8 @@
 
 #include "Luau/IrUtils.h"
 
+LUAU_FASTFLAG(LuauCodegenFastcall3)
+
 namespace Luau
 {
 namespace CodeGen
@@ -44,11 +46,11 @@ void IrValueLocationTracking::beforeInstLowering(IrInst& inst)
         invalidateRestoreVmRegs(vmRegOp(inst.a), -1);
         break;
     case IrCmd::FASTCALL:
-        invalidateRestoreVmRegs(vmRegOp(inst.b), function.intOp(inst.f));
+        invalidateRestoreVmRegs(vmRegOp(inst.b), function.intOp(FFlag::LuauCodegenFastcall3 ? inst.d : inst.f));
         break;
     case IrCmd::INVOKE_FASTCALL:
         // Multiple return sequences (count == -1) are defined by ADJUST_STACK_TO_REG
-        if (int count = function.intOp(inst.f); count != -1)
+        if (int count = function.intOp(FFlag::LuauCodegenFastcall3 ? inst.g : inst.f); count != -1)
             invalidateRestoreVmRegs(vmRegOp(inst.b), count);
         break;
     case IrCmd::DO_ARITH:
@@ -94,6 +96,7 @@ void IrValueLocationTracking::beforeInstLowering(IrInst& inst)
     case IrCmd::LOAD_POINTER:
     case IrCmd::LOAD_DOUBLE:
     case IrCmd::LOAD_INT:
+    case IrCmd::LOAD_FLOAT:
     case IrCmd::LOAD_TVALUE:
     case IrCmd::CMP_ANY:
     case IrCmd::JUMP_IF_TRUTHY:
@@ -130,16 +133,22 @@ void IrValueLocationTracking::beforeInstLowering(IrInst& inst)
     case IrCmd::MAX_NUM:
     case IrCmd::JUMP_EQ_TAG:
     case IrCmd::JUMP_CMP_NUM:
+    case IrCmd::FLOOR_NUM:
+    case IrCmd::CEIL_NUM:
+    case IrCmd::ROUND_NUM:
+    case IrCmd::SQRT_NUM:
+    case IrCmd::ABS_NUM:
         break;
 
     default:
         // All instructions which reference registers have to be handled explicitly
-        LUAU_ASSERT(inst.a.kind != IrOpKind::VmReg);
-        LUAU_ASSERT(inst.b.kind != IrOpKind::VmReg);
-        LUAU_ASSERT(inst.c.kind != IrOpKind::VmReg);
-        LUAU_ASSERT(inst.d.kind != IrOpKind::VmReg);
-        LUAU_ASSERT(inst.e.kind != IrOpKind::VmReg);
-        LUAU_ASSERT(inst.f.kind != IrOpKind::VmReg);
+        CODEGEN_ASSERT(inst.a.kind != IrOpKind::VmReg);
+        CODEGEN_ASSERT(inst.b.kind != IrOpKind::VmReg);
+        CODEGEN_ASSERT(inst.c.kind != IrOpKind::VmReg);
+        CODEGEN_ASSERT(inst.d.kind != IrOpKind::VmReg);
+        CODEGEN_ASSERT(inst.e.kind != IrOpKind::VmReg);
+        CODEGEN_ASSERT(inst.f.kind != IrOpKind::VmReg);
+        CODEGEN_ASSERT(inst.g.kind != IrOpKind::VmReg);
         break;
     }
 }
@@ -153,6 +162,9 @@ void IrValueLocationTracking::afterInstLowering(IrInst& inst, uint32_t instIdx)
     case IrCmd::LOAD_DOUBLE:
     case IrCmd::LOAD_INT:
     case IrCmd::LOAD_TVALUE:
+        if (inst.a.kind == IrOpKind::VmReg)
+            invalidateRestoreOp(inst.a, /*skipValueInvalidation*/ false);
+
         recordRestoreOp(instIdx, inst.a);
         break;
     case IrCmd::STORE_POINTER:
@@ -226,7 +238,7 @@ void IrValueLocationTracking::invalidateRestoreOp(IrOp location, bool skipValueI
     }
     else if (location.kind == IrOpKind::VmConst)
     {
-        LUAU_ASSERT(!"VM constants are immutable");
+        CODEGEN_ASSERT(!"VM constants are immutable");
     }
 }
 

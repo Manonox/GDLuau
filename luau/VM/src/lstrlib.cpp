@@ -429,6 +429,18 @@ static const char* match(MatchState* ms, const char* s, const char* p)
 {
     if (ms->matchdepth-- == 0)
         luaL_error(ms->L, "pattern too complex");
+
+    lua_State* L = ms->L;
+    void (*interrupt)(lua_State*, int) = L->global->cb.interrupt;
+
+    if (LUAU_UNLIKELY(!!interrupt))
+    {
+        // this interrupt is not yieldable
+        L->nCcalls++;
+        interrupt(L, -1);
+        L->nCcalls--;
+    }
+
 init: // using goto's to optimize tail recursion
     if (p != ms->p_end)
     { // end of pattern?

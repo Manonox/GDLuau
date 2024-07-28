@@ -11,6 +11,7 @@ namespace CodeGen
 {
 
 struct IrBuilder;
+enum class HostMetamethod;
 
 inline bool isJumpD(LuauOpcode op)
 {
@@ -63,6 +64,7 @@ inline bool isFastCall(LuauOpcode op)
     case LOP_FASTCALL1:
     case LOP_FASTCALL2:
     case LOP_FASTCALL2K:
+    case LOP_FASTCALL3:
         return true;
 
     default:
@@ -129,6 +131,7 @@ inline bool isNonTerminatingJump(IrCmd cmd)
     case IrCmd::CHECK_NODE_NO_NEXT:
     case IrCmd::CHECK_NODE_VALUE:
     case IrCmd::CHECK_BUFFER_LEN:
+    case IrCmd::CHECK_USERDATA_TAG:
         return true;
     default:
         break;
@@ -145,6 +148,7 @@ inline bool hasResult(IrCmd cmd)
     case IrCmd::LOAD_POINTER:
     case IrCmd::LOAD_DOUBLE:
     case IrCmd::LOAD_INT:
+    case IrCmd::LOAD_FLOAT:
     case IrCmd::LOAD_TVALUE:
     case IrCmd::LOAD_ENV:
     case IrCmd::GET_ARR_ADDR:
@@ -167,6 +171,12 @@ inline bool hasResult(IrCmd cmd)
     case IrCmd::ROUND_NUM:
     case IrCmd::SQRT_NUM:
     case IrCmd::ABS_NUM:
+    case IrCmd::SIGN_NUM:
+    case IrCmd::ADD_VEC:
+    case IrCmd::SUB_VEC:
+    case IrCmd::MUL_VEC:
+    case IrCmd::DIV_VEC:
+    case IrCmd::UNM_VEC:
     case IrCmd::NOT_ANY:
     case IrCmd::CMP_ANY:
     case IrCmd::TABLE_LEN:
@@ -176,10 +186,13 @@ inline bool hasResult(IrCmd cmd)
     case IrCmd::DUP_TABLE:
     case IrCmd::TRY_NUM_TO_INDEX:
     case IrCmd::TRY_CALL_FASTGETTM:
+    case IrCmd::NEW_USERDATA:
     case IrCmd::INT_TO_NUM:
     case IrCmd::UINT_TO_NUM:
     case IrCmd::NUM_TO_INT:
     case IrCmd::NUM_TO_UINT:
+    case IrCmd::NUM_TO_VEC:
+    case IrCmd::TAG_VECTOR:
     case IrCmd::SUBSTITUTE:
     case IrCmd::INVOKE_FASTCALL:
     case IrCmd::BITAND_UINT:
@@ -232,6 +245,12 @@ inline bool isPseudo(IrCmd cmd)
 IrValueKind getCmdValueKind(IrCmd cmd);
 
 bool isGCO(uint8_t tag);
+
+// Optional bit has to be cleared at call site, otherwise, this will return 'false' for 'userdata?'
+bool isUserdataBytecodeType(uint8_t ty);
+bool isCustomUserdataBytecodeType(uint8_t ty);
+
+HostMetamethod tmToHostMetamethod(int tm);
 
 // Manually add or remove use of an operand
 void addUse(IrFunction& function, IrOp op);

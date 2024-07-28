@@ -14,6 +14,12 @@
 
 LUAU_FASTINTVARIABLE(LuauSuggestionDistance, 4)
 
+LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
+
+LUAU_FASTFLAG(LuauAttribute)
+LUAU_FASTFLAG(LuauNativeAttribute)
+LUAU_FASTFLAGVARIABLE(LintRedundantNativeAttribute, false)
+
 namespace Luau
 {
 
@@ -1848,6 +1854,49 @@ private:
 
     bool visit(AstTypeTable* node) override
     {
+        if (FFlag::DebugLuauDeferredConstraintResolution)
+        {
+            struct Rec
+            {
+                AstTableAccess access;
+                Location location;
+            };
+            DenseHashMap<AstName, Rec> names(AstName{});
+
+            for (const AstTableProp& item : node->props)
+            {
+                Rec* rec = names.find(item.name);
+                if (!rec)
+                {
+                    names[item.name] = Rec{item.access, item.location};
+                    continue;
+                }
+
+                if (int(rec->access) & int(item.access))
+                {
+                    if (rec->access == item.access)
+                        emitWarning(*context, LintWarning::Code_TableLiteral, item.location,
+                            "Table type field '%s' is a duplicate; previously defined at line %d", item.name.value, rec->location.begin.line + 1);
+                    else if (rec->access == AstTableAccess::ReadWrite)
+                        emitWarning(*context, LintWarning::Code_TableLiteral, item.location,
+                            "Table type field '%s' is already read-write; previously defined at line %d", item.name.value,
+                            rec->location.begin.line + 1);
+                    else if (rec->access == AstTableAccess::Read)
+                        emitWarning(*context, LintWarning::Code_TableLiteral, rec->location,
+                            "Table type field '%s' already has a read type defined at line %d", item.name.value, rec->location.begin.line + 1);
+                    else if (rec->access == AstTableAccess::Write)
+                        emitWarning(*context, LintWarning::Code_TableLiteral, rec->location,
+                            "Table type field '%s' already has a write type defined at line %d", item.name.value, rec->location.begin.line + 1);
+                    else
+                        LUAU_ASSERT(!"Unreachable");
+                }
+                else
+                    rec->access = AstTableAccess(int(rec->access) | int(item.access));
+            }
+
+            return true;
+        }
+
         DenseHashMap<AstName, int> names(AstName{});
 
         for (const AstTableProp& item : node->props)
@@ -2877,6 +2926,62 @@ static void lintComments(LintContext& context, const std::vector<HotComment>& ho
     }
 }
 
+static bool hasNativeCommentDirective(const std::vector<HotComment>& hotcomments)
+{
+    LUAU_ASSERT(FFlag::LuauNativeAttribute);
+    LUAU_ASSERT(FFlag::LintRedundantNativeAttribute);
+
+    for (const HotComment& hc : hotcomments)
+    {
+        if (hc.content.empty() || hc.content[0] == ' ' || hc.content[0] == '\t')
+            continue;
+
+        if (hc.header)
+        {
+            size_t space = hc.content.find_first_of(" \t");
+            std::string_view first = std::string_view(hc.content).substr(0, space);
+
+            if (first == "native")
+                return true;
+        }
+    }
+
+    return false;
+}
+
+struct LintRedundantNativeAttribute : AstVisitor
+{
+public:
+    LUAU_NOINLINE static void process(LintContext& context)
+    {
+        LUAU_ASSERT(FFlag::LuauNativeAttribute);
+        LUAU_ASSERT(FFlag::LintRedundantNativeAttribute);
+
+        LintRedundantNativeAttribute pass;
+        pass.context = &context;
+        context.root->visit(&pass);
+    }
+
+private:
+    LintContext* context;
+
+    bool visit(AstExprFunction* node) override
+    {
+        node->body->visit(this);
+
+        for (const auto attribute : node->attributes)
+        {
+            if (attribute->type == AstAttr::Type::Native)
+            {
+                emitWarning(*context, LintWarning::Code_RedundantNativeAttribute, attribute->location,
+                    "native attribute on a function is redundant in a native module; consider removing it");
+            }
+        }
+
+        return false;
+    }
+};
+
 std::vector<LintWarning> lint(AstStat* root, const AstNameTable& names, const ScopePtr& env, const Module* module,
     const std::vector<HotComment>& hotcomments, const LintOptions& options)
 {
@@ -2962,6 +3067,13 @@ std::vector<LintWarning> lint(AstStat* root, const AstNameTable& names, const Sc
 
     if (context.warningEnabled(LintWarning::Code_ComparisonPrecedence))
         LintComparisonPrecedence::process(context);
+
+    if (FFlag::LuauNativeAttribute && FFlag::LintRedundantNativeAttribute &&
+        context.warningEnabled(LintWarning::Code_RedundantNativeAttribute))
+    {
+        if (hasNativeCommentDirective(hotcomments))
+            LintRedundantNativeAttribute::process(context);
+    }
 
     std::sort(context.result.begin(), context.result.end(), WarningComparator());
 

@@ -64,6 +64,28 @@ do
 
   a = table.move({[minI] = 100}, minI, minI, maxI)
   eqT(a, {[minI] = 100, [maxI] = 100})
+
+  -- hash part skips array slice
+  a = {}
+  table.move({[-1] = 1, [0] = 2, [1] = 3, [2] = 4}, -1, 3, 1, a)
+  eqT(a, {[1] = 1, [2] = 2, [3] = 3, [4] = 4})
+
+  a = {}
+  table.move({[-1] = 1, [0] = 2, [1] = 3, [2] = 4, [10] = 5, [100] = 6, [1000] = 7}, -1, 3, 1, a)
+  eqT(a, {[1] = 1, [2] = 2, [3] = 3, [4] = 4})
+
+  -- moving ranges containing nil values into tables with values
+  a = {1, 2, 3, 4, 5}
+  table.move({10}, 1, 3, 2, a)
+  eqT(a, {1, 10, nil, nil, 5})
+
+  a = {1, 2, 3, 4, 5}
+  table.move({10}, -1, 1, 2, a)
+  eqT(a, {1, nil, nil, 10, 5})
+
+  a = {[-1000] = 1, [1000] = 2, [1] = 3}
+  table.move({10}, -1000, 1000, -1000, a)
+  eqT(a, {10})
 end
 
 checkerror("too many", table.move, {}, 0, maxI, 1)

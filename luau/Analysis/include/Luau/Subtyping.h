@@ -5,6 +5,8 @@
 #include "Luau/TypeFwd.h"
 #include "Luau/TypePairHash.h"
 #include "Luau/TypePath.h"
+#include "Luau/TypeFunction.h"
+#include "Luau/TypeCheckLimits.h"
 #include "Luau/DenseHash.h"
 
 #include <vector>
@@ -19,13 +21,15 @@ struct InternalErrorReporter;
 
 class TypeIds;
 class Normalizer;
-struct NormalizedType;
 struct NormalizedClassType;
-struct NormalizedStringType;
 struct NormalizedFunctionType;
-struct TypeArena;
+struct NormalizedStringType;
+struct NormalizedType;
+struct Property;
 struct Scope;
 struct TableIndexer;
+struct TypeArena;
+struct TypeCheckLimits;
 
 enum class SubtypingVariance
 {
@@ -60,10 +64,9 @@ static const SubtypingReasoning kEmptyReasoning = SubtypingReasoning{TypePath::k
 struct SubtypingResult
 {
     bool isSubtype = false;
-    bool isErrorSuppressing = false;
     bool normalizationTooComplex = false;
     bool isCacheable = true;
-
+    ErrorVec errors;
     /// The reason for isSubtype to be false. May not be present even if
     /// isSubtype is false, depending on the input types.
     SubtypingReasonings reasoning{kEmptyReasoning};
@@ -76,6 +79,8 @@ struct SubtypingResult
     SubtypingResult& withBothPath(TypePath::Path path);
     SubtypingResult& withSubPath(TypePath::Path path);
     SubtypingResult& withSuperPath(TypePath::Path path);
+    SubtypingResult& withErrors(ErrorVec& err);
+    SubtypingResult& withError(TypeError err);
 
     // Only negates the `isSubtype`.
     static SubtypingResult negate(const SubtypingResult& result);
@@ -98,7 +103,19 @@ struct SubtypingEnvironment
     DenseHashMap<TypeId, GenericBounds> mappedGenerics{nullptr};
     DenseHashMap<TypePackId, TypePackId> mappedGenericPacks{nullptr};
 
+    /*
+     * See the test cyclic_tables_are_assumed_to_be_compatible_with_classes for
+     * details.
+     *
+     * An empty value is equivalent to a nonexistent key.
+     */
+    DenseHashMap<TypeId, TypeId> substitutions{nullptr};
+
     DenseHashMap<std::pair<TypeId, TypeId>, SubtypingResult, TypePairHash> ephemeralCache{{}};
+
+    /// Applies `mappedGenerics` to the given type.
+    /// This is used specifically to substitute for generics in type function instances.
+    std::optional<TypeId> applyMappedGenerics(NotNull<BuiltinTypes> builtinTypes, NotNull<TypeArena> arena, TypeId ty);
 };
 
 struct Subtyping
@@ -109,6 +126,7 @@ struct Subtyping
     NotNull<InternalErrorReporter> iceReporter;
 
     NotNull<Scope> scope;
+    TypeCheckLimits limits;
 
     enum class Variance
     {
@@ -182,14 +200,16 @@ private:
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const MetatableType* subMt, const MetatableType* superMt);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const MetatableType* subMt, const TableType* superTable);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const ClassType* subClass, const ClassType* superClass);
-    SubtypingResult isCovariantWith(SubtypingEnvironment& env, const ClassType* subClass, const TableType* superTable);
+    SubtypingResult isCovariantWith(SubtypingEnvironment& env, TypeId subTy, const ClassType* subClass, TypeId superTy, const TableType* superTable);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const FunctionType* subFunction, const FunctionType* superFunction);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const PrimitiveType* subPrim, const TableType* superTable);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const SingletonType* subSingleton, const TableType* superTable);
 
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const TableIndexer& subIndexer, const TableIndexer& superIndexer);
+    SubtypingResult isCovariantWith(SubtypingEnvironment& env, const Property& subProperty, const Property& superProperty, const std::string& name);
 
-    SubtypingResult isCovariantWith(SubtypingEnvironment& env, const NormalizedType* subNorm, const NormalizedType* superNorm);
+    SubtypingResult isCovariantWith(
+        SubtypingEnvironment& env, const std::shared_ptr<const NormalizedType>& subNorm, const std::shared_ptr<const NormalizedType>& superNorm);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const NormalizedClassType& subClass, const NormalizedClassType& superClass);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const NormalizedClassType& subClass, const TypeIds& superTables);
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const NormalizedStringType& subString, const NormalizedStringType& superString);
@@ -199,6 +219,8 @@ private:
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const TypeIds& subTypes, const TypeIds& superTypes);
 
     SubtypingResult isCovariantWith(SubtypingEnvironment& env, const VariadicTypePack* subVariadic, const VariadicTypePack* superVariadic);
+    SubtypingResult isCovariantWith(SubtypingEnvironment& env, const TypeFunctionInstanceType* subFunctionInstance, const TypeId superTy);
+    SubtypingResult isCovariantWith(SubtypingEnvironment& env, const TypeId subTy, const TypeFunctionInstanceType* superFunctionInstance);
 
     bool bindGeneric(SubtypingEnvironment& env, TypeId subTp, TypeId superTp);
     bool bindGeneric(SubtypingEnvironment& env, TypePackId subTp, TypePackId superTp);
@@ -206,6 +228,9 @@ private:
     template<typename T, typename Container>
     TypeId makeAggregateType(const Container& container, TypeId orElse);
 
+    std::pair<TypeId, ErrorVec> handleTypeFunctionReductionResult(const TypeFunctionInstanceType* functionInstance);
+
+    [[noreturn]] void unexpected(TypeId ty);
     [[noreturn]] void unexpected(TypePackId tp);
 };
 

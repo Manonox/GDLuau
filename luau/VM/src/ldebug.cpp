@@ -186,8 +186,16 @@ int lua_getinfo(lua_State* L, int level, const char* what, lua_Debug* ar)
     CallInfo* ci = NULL;
     if (level < 0)
     {
-        const TValue* func = luaA_toobject(L, level);
-        api_check(L, ttisfunction(func));
+        // element has to be within stack
+        if (-level > L->top - L->base)
+            return 0;
+
+        StkId func = L->top + level;
+
+        // and it has to be a function
+        if (!ttisfunction(func))
+            return 0;
+
         f = clvalue(func);
     }
     else if (unsigned(level) < unsigned(L->ci - L->base_ci))
@@ -322,19 +330,25 @@ l_noret luaG_runerrorL(lua_State* L, const char* fmt, ...)
     vsnprintf(result, sizeof(result), fmt, argp);
     va_end(argp);
 
+    lua_rawcheckstack(L, 1);
+
     pusherror(L, result);
     luaD_throw(L, LUA_ERRRUN);
 }
 
 void luaG_pusherror(lua_State* L, const char* error)
 {
+    lua_rawcheckstack(L, 1);
+
     pusherror(L, error);
 }
 
 void luaG_breakpoint(lua_State* L, Proto* p, int line, bool enable)
 {
+    void (*ondisable)(lua_State*, Proto*) = L->global->ecb.disable;
+
     // since native code doesn't support breakpoints, we would need to update all call frames with LUAU_CALLINFO_NATIVE that refer to p
-    if (p->lineinfo && !p->execdata)
+    if (p->lineinfo && (ondisable || !p->execdata))
     {
         for (int i = 0; i < p->sizecode; ++i)
         {
@@ -359,6 +373,11 @@ void luaG_breakpoint(lua_State* L, Proto* p, int line, bool enable)
             p->code[i] &= ~0xff;
             p->code[i] |= op;
             LUAU_ASSERT(LUAU_INSN_OP(p->code[i]) == op);
+
+            // currently we don't restore native code when breakpoint is disabled.
+            // this will be addressed in the future.
+            if (enable && p->execdata && ondisable)
+                ondisable(L, p);
 
             // note: this is important!
             // we only patch the *first* instruction in each proto that's attributed to a given line

@@ -631,4 +631,77 @@ print(t.x)
     CHECK(phi->operands.at(1) == x2);
 }
 
+TEST_CASE_FIXTURE(DataFlowGraphFixture, "insert_trivial_phi_nodes_inside_of_phi_nodes")
+{
+    dfg(R"(
+        local t = {}
+
+        local function f(k: string)
+            if t[k] ~= nil then
+                return
+            end
+
+            t[k] = 5
+        end
+    )");
+
+    DefId t1 = graph->getDef(query<AstStatLocal>(module)->vars.data[0]); // local t = {}
+    DefId t2 = getDef<AstExprLocal, 1>();                                // t[k] ~= nil
+    DefId t3 = getDef<AstExprLocal, 3>();                                // t[k] = 5
+
+    CHECK(t1 != t2);
+    CHECK(t2 == t3);
+
+    const Phi* t2phi = get<Phi>(t2);
+    REQUIRE(t2phi);
+    CHECK(t2phi->operands.size() == 1);
+    CHECK(t2phi->operands.at(0) == t1);
+}
+
+TEST_CASE_FIXTURE(DataFlowGraphFixture, "dfg_function_definition_in_a_do_block")
+{
+    dfg(R"(
+        local f
+        do
+            function f()
+            end
+        end
+        f()
+    )");
+
+    DefId x1 = graph->getDef(query<AstStatLocal>(module)->vars.data[0]);
+    DefId x2 = getDef<AstExprLocal, 1>(); // x = 5
+    DefId x3 = getDef<AstExprLocal, 2>(); // print(x)
+
+    CHECK(x1 != x2);
+    CHECK(x1 != x3);
+    CHECK(x2 == x3);
+}
+
+TEST_CASE_FIXTURE(DataFlowGraphFixture, "dfg_captured_local_is_assigned_a_function")
+{
+    dfg(R"(
+        local f
+
+        local function g()
+            f()
+        end
+
+        function f()
+        end
+    )");
+
+    DefId f1 = graph->getDef(query<AstStatLocal>(module)->vars.data[0]);
+    DefId f2 = getDef<AstExprLocal, 1>();
+    DefId f3 = getDef<AstExprLocal, 2>();
+
+    CHECK(f1 != f2);
+    CHECK(f2 != f3);
+
+    const Phi* f2phi = get<Phi>(f2);
+    REQUIRE(f2phi);
+    CHECK(f2phi->operands.size() == 1);
+    CHECK(f2phi->operands.at(0) == f3);
+}
+
 TEST_SUITE_END();

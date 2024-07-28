@@ -2,6 +2,7 @@
 #include "Luau/Instantiation.h"
 
 #include "Luau/Common.h"
+#include "Luau/Instantiation2.h" // including for `Replacer` which was stolen since it will be kept in the new solver
 #include "Luau/ToString.h"
 #include "Luau/TxnLog.h"
 #include "Luau/TypeArena.h"
@@ -10,9 +11,22 @@
 #include <algorithm>
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
+LUAU_FASTFLAG(LuauReusableSubstitutions)
 
 namespace Luau
 {
+
+void Instantiation::resetState(const TxnLog* log, TypeArena* arena, NotNull<BuiltinTypes> builtinTypes, TypeLevel level, Scope* scope)
+{
+    LUAU_ASSERT(FFlag::LuauReusableSubstitutions);
+
+    Substitution::resetState(log, arena);
+
+    this->builtinTypes = builtinTypes;
+
+    this->level = level;
+    this->scope = scope;
+}
 
 bool Instantiation::isDirty(TypeId ty)
 {
@@ -57,13 +71,26 @@ TypeId Instantiation::clean(TypeId ty)
     clone.argNames = ftv->argNames;
     TypeId result = addType(std::move(clone));
 
-    // Annoyingly, we have to do this even if there are no generics,
-    // to replace any generic tables.
-    ReplaceGenerics replaceGenerics{log, arena, builtinTypes, level, scope, ftv->generics, ftv->genericPacks};
+    if (FFlag::LuauReusableSubstitutions)
+    {
+        // Annoyingly, we have to do this even if there are no generics,
+        // to replace any generic tables.
+        reusableReplaceGenerics.resetState(log, arena, builtinTypes, level, scope, ftv->generics, ftv->genericPacks);
 
-    // TODO: What to do if this returns nullopt?
-    // We don't have access to the error-reporting machinery
-    result = replaceGenerics.substitute(result).value_or(result);
+        // TODO: What to do if this returns nullopt?
+        // We don't have access to the error-reporting machinery
+        result = reusableReplaceGenerics.substitute(result).value_or(result);
+    }
+    else
+    {
+        // Annoyingly, we have to do this even if there are no generics,
+        // to replace any generic tables.
+        ReplaceGenerics replaceGenerics{log, arena, builtinTypes, level, scope, ftv->generics, ftv->genericPacks};
+
+        // TODO: What to do if this returns nullopt?
+        // We don't have access to the error-reporting machinery
+        result = replaceGenerics.substitute(result).value_or(result);
+    }
 
     asMutable(result)->documentationSymbol = ty->documentationSymbol;
     return result;
@@ -73,6 +100,22 @@ TypePackId Instantiation::clean(TypePackId tp)
 {
     LUAU_ASSERT(false);
     return tp;
+}
+
+void ReplaceGenerics::resetState(const TxnLog* log, TypeArena* arena, NotNull<BuiltinTypes> builtinTypes, TypeLevel level, Scope* scope,
+    const std::vector<TypeId>& generics, const std::vector<TypePackId>& genericPacks)
+{
+    LUAU_ASSERT(FFlag::LuauReusableSubstitutions);
+
+    Substitution::resetState(log, arena);
+
+    this->builtinTypes = builtinTypes;
+
+    this->level = level;
+    this->scope = scope;
+
+    this->generics = generics;
+    this->genericPacks = genericPacks;
 }
 
 bool ReplaceGenerics::ignoreChildren(TypeId ty)
@@ -142,39 +185,6 @@ TypePackId ReplaceGenerics::clean(TypePackId tp)
     LUAU_ASSERT(isDirty(tp));
     return addTypePack(TypePackVar(FreeTypePack{scope, level}));
 }
-
-struct Replacer : Substitution
-{
-    DenseHashMap<TypeId, TypeId> replacements;
-    DenseHashMap<TypePackId, TypePackId> replacementPacks;
-
-    Replacer(NotNull<TypeArena> arena, DenseHashMap<TypeId, TypeId> replacements, DenseHashMap<TypePackId, TypePackId> replacementPacks)
-        : Substitution(TxnLog::empty(), arena)
-        , replacements(std::move(replacements))
-        , replacementPacks(std::move(replacementPacks))
-    {
-    }
-
-    bool isDirty(TypeId ty) override
-    {
-        return replacements.find(ty) != nullptr;
-    }
-
-    bool isDirty(TypePackId tp) override
-    {
-        return replacementPacks.find(tp) != nullptr;
-    }
-
-    TypeId clean(TypeId ty) override
-    {
-        return replacements[ty];
-    }
-
-    TypePackId clean(TypePackId tp) override
-    {
-        return replacementPacks[tp];
-    }
-};
 
 std::optional<TypeId> instantiate(
     NotNull<BuiltinTypes> builtinTypes, NotNull<TypeArena> arena, NotNull<TypeCheckLimits> limits, NotNull<Scope> scope, TypeId ty)

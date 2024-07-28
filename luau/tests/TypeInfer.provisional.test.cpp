@@ -12,7 +12,6 @@ using namespace Luau;
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
 LUAU_FASTFLAG(DebugLuauSharedSelf);
-LUAU_FASTFLAG(LuauTransitiveSubtyping);
 LUAU_FASTINT(LuauNormalizeCacheLimit);
 LUAU_FASTINT(LuauTarjanChildLimit);
 LUAU_FASTINT(LuauTypeInferIterationLimit);
@@ -273,7 +272,6 @@ TEST_CASE_FIXTURE(Fixture, "discriminate_from_x_not_equal_to_nil")
         // Should be {| x: nil, y: nil |}
         CHECK_EQ("{| x: nil, y: nil |} | {| x: string, y: number |}", toString(requireTypeAtPosition({7, 28})));
     }
-
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "bail_early_if_unification_is_too_complicated" * doctest::timeout(0.5))
@@ -314,7 +312,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "bail_early_if_unification_is_too_complicated
     }
 }
 
-// FIXME: Move this test to another source file when removing FFlag::LuauLowerBoundsCalculation
 TEST_CASE_FIXTURE(Fixture, "do_not_ice_when_trying_to_pick_first_of_generic_type_pack")
 {
     // In-place quantification causes these types to have the wrong types but only because of nasty interaction with prototyping.
@@ -508,10 +505,6 @@ TEST_CASE_FIXTURE(Fixture, "dcr_can_partially_dispatch_a_constraint")
 
 TEST_CASE_FIXTURE(Fixture, "free_options_cannot_be_unified_together")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     TypeArena arena;
     TypeId nilType = builtinTypes->nilType;
 
@@ -917,10 +910,6 @@ TEST_CASE_FIXTURE(Fixture, "floating_generics_should_not_be_allowed")
 
 TEST_CASE_FIXTURE(Fixture, "free_options_can_be_unified_together")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     TypeArena arena;
     TypeId nilType = builtinTypes->nilType;
 
@@ -1072,7 +1061,6 @@ tbl:f3()
 TEST_CASE_FIXTURE(BuiltinsFixture, "normalization_limit_in_unify_with_any")
 {
     ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
         {FFlag::DebugLuauDeferredConstraintResolution, true},
     };
 
@@ -1104,6 +1092,45 @@ foo(1 :: any)
     CheckResult result = check(source);
 
     LUAU_REQUIRE_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(Fixture, "luau_roact_useState_nilable_state_1")
+{
+    ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, true};
+
+    CheckResult result = check(R"(
+        type Dispatch<A> = (A) -> ()
+        type BasicStateAction<S> = ((S) -> S) | S
+
+        type ScriptConnection = { Disconnect: (ScriptConnection) -> () }
+
+        local blah = nil :: any
+
+        local function useState<S>(
+            initialState: (() -> S) | S,
+            ...
+        ): (S, Dispatch<BasicStateAction<S>>)
+            return blah, blah
+        end
+
+        local a, b = useState(nil :: ScriptConnection?)
+
+        if a then
+            a:Disconnect()
+            b(nil :: ScriptConnection?)
+        end
+    )");
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        LUAU_REQUIRE_NO_ERRORS(result);
+    else
+    {
+        // This is a known bug in the old solver.
+
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+
+        CHECK(Location{{19, 14}, {19, 41}} == result.errors[0].location);
+    }
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "luau_roact_useState_minimization")
@@ -1140,6 +1167,107 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "luau_roact_useState_minimization")
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "bin_prov")
+{
+    CheckResult result = check(R"(
+        local Bin = {}
+
+        function Bin:add(item)
+            self.head = { item = item}
+            return item
+        end
+
+        function Bin:destroy()
+            while self.head do
+                local item = self.head.item
+                if type(item) == "function" then
+                    item()
+                elseif item.Destroy ~= nil then
+                end
+                self.head = self.head.next
+            end
+        end
+    )");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "update_phonemes_minimized")
+{
+    CheckResult result = check(R"(
+        local video
+        function(response)
+            for index = 1, #response do
+                video = video
+            end
+            return video
+        end
+    )");
+
+    LUAU_REQUIRE_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(Fixture, "table_containing_non_final_type_is_erroneously_cached")
+{
+    TypeArena arena;
+    Scope globalScope(builtinTypes->anyTypePack);
+    UnifierSharedState sharedState{&ice};
+    Normalizer normalizer{&arena, builtinTypes, NotNull{&sharedState}};
+
+    TypeId tableTy = arena.addType(TableType{});
+    TableType* table = getMutable<TableType>(tableTy);
+    REQUIRE(table);
+
+    TypeId freeTy = arena.freshType(&globalScope);
+
+    table->props["foo"] = Property::rw(freeTy);
+
+    std::shared_ptr<const NormalizedType> n1 = normalizer.normalize(tableTy);
+    std::shared_ptr<const NormalizedType> n2 = normalizer.normalize(tableTy);
+
+    // This should not hold
+    CHECK(n1 == n2);
+}
+
+// This is doable with the new solver, but there are some problems we have to work out first.
+// CLI-111113
+TEST_CASE_FIXTURE(Fixture, "we_cannot_infer_functions_that_return_inconsistently")
+{
+    CheckResult result = check(R"(
+        function find_first<T>(tbl: {T}, el)
+            for i, e in tbl do
+                if e == el then
+                    return i
+                end
+            end
+            return nil
+        end
+    )");
+
+#if 0
+    // This #if block describes what should happen.
+    LUAU_CHECK_NO_ERRORS(result);
+
+    // The second argument has type unknown because the == operator does not
+    // constrain the type of el.
+    CHECK("<T>({T}, unknown) -> number?" == toString(requireType("find_first")));
+#else
+    // This is what actually happens right now.
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+    {
+        LUAU_CHECK_ERROR_COUNT(2, result);
+
+        // The second argument should be unknown.  CLI-111111
+        CHECK("<T>({T}, 'b) -> number" == toString(requireType("find_first")));
+    }
+    else
+    {
+        LUAU_CHECK_ERROR_COUNT(1, result);
+
+        CHECK("<T, b>({T}, b) -> number" == toString(requireType("find_first")));
+    }
+#endif
 }
 
 TEST_SUITE_END();

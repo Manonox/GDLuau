@@ -66,14 +66,14 @@ struct RefinementClassFixture : BuiltinsFixture
         std::optional<TypeId> rootSuper = std::make_optional(builtinTypes->classType);
 
         unfreeze(arena);
-        TypeId vec3 = arena.addType(ClassType{"Vector3", {}, rootSuper, std::nullopt, {}, nullptr, "Test"});
+        TypeId vec3 = arena.addType(ClassType{"Vector3", {}, rootSuper, std::nullopt, {}, nullptr, "Test", {}});
         getMutable<ClassType>(vec3)->props = {
             {"X", Property{builtinTypes->numberType}},
             {"Y", Property{builtinTypes->numberType}},
             {"Z", Property{builtinTypes->numberType}},
         };
 
-        TypeId inst = arena.addType(ClassType{"Instance", {}, rootSuper, std::nullopt, {}, nullptr, "Test"});
+        TypeId inst = arena.addType(ClassType{"Instance", {}, rootSuper, std::nullopt, {}, nullptr, "Test", {}});
 
         TypePackId isAParams = arena.addTypePack({inst, builtinTypes->stringType});
         TypePackId isARets = arena.addTypePack({builtinTypes->booleanType});
@@ -86,8 +86,8 @@ struct RefinementClassFixture : BuiltinsFixture
             {"IsA", Property{isA}},
         };
 
-        TypeId folder = frontend.globals.globalTypes.addType(ClassType{"Folder", {}, inst, std::nullopt, {}, nullptr, "Test"});
-        TypeId part = frontend.globals.globalTypes.addType(ClassType{"Part", {}, inst, std::nullopt, {}, nullptr, "Test"});
+        TypeId folder = frontend.globals.globalTypes.addType(ClassType{"Folder", {}, inst, std::nullopt, {}, nullptr, "Test", {}});
+        TypeId part = frontend.globals.globalTypes.addType(ClassType{"Part", {}, inst, std::nullopt, {}, nullptr, "Test", {}});
         getMutable<ClassType>(part)->props = {
             {"Position", Property{vec3}},
         };
@@ -323,6 +323,99 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "typeguard_in_assert_position")
     REQUIRE_EQ("number", toString(requireType("b")));
 }
 
+TEST_CASE_FIXTURE(BuiltinsFixture, "refine_unknown_to_table_then_test_a_prop")
+{
+    CheckResult result = check(R"(
+        local function f(x: unknown): string?
+            if typeof(x) == "table" then
+                if typeof(x.foo) == "string" then
+                    return x.foo
+                end
+            end
+
+            return nil
+        end
+    )");
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        LUAU_REQUIRE_NO_ERRORS(result);
+    else
+    {
+        LUAU_REQUIRE_ERROR_COUNT(2, result);
+
+        for (size_t i = 0; i < result.errors.size(); i++)
+        {
+            const UnknownProperty* up = get<UnknownProperty>(result.errors[i]);
+            REQUIRE_EQ("foo", up->key);
+            REQUIRE_EQ("unknown", toString(up->table));
+        }
+    }
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "refine_unknown_to_table_then_test_a_nested_prop")
+{
+    CheckResult result = check(R"(
+        local function f(x: unknown): string?
+            if typeof(x) == "table" then
+                -- this should error, `x.foo` is an unknown property
+                if typeof(x.foo.bar) == "string" then
+                    return x.foo.bar
+                end
+            end
+
+            return nil
+        end
+    )");
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+    {
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+        const UnknownProperty* up = get<UnknownProperty>(result.errors[0]);
+        REQUIRE_EQ("bar", up->key);
+        REQUIRE_EQ("unknown", toString(up->table));
+    }
+    else
+    {
+        LUAU_REQUIRE_ERROR_COUNT(2, result);
+
+        for (size_t i = 0; i < result.errors.size(); i++)
+        {
+            const UnknownProperty* up = get<UnknownProperty>(result.errors[i]);
+            REQUIRE_EQ("foo", up->key);
+            REQUIRE_EQ("unknown", toString(up->table));
+        }
+    }
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "refine_unknown_to_table_then_test_a_tested_nested_prop")
+{
+    CheckResult result = check(R"(
+        local function f(x: unknown): string?
+            if typeof(x) == "table" then
+                if typeof(x.foo) == "table" and typeof(x.foo.bar) == "string" then
+                    return x.foo.bar
+                end
+            end
+
+            return nil
+        end
+    )");
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        LUAU_REQUIRE_NO_ERRORS(result);
+    else
+    {
+        LUAU_REQUIRE_ERROR_COUNT(3, result);
+
+        for (size_t i = 0; i < result.errors.size(); i++)
+        {
+            const UnknownProperty* up = get<UnknownProperty>(result.errors[i]);
+            REQUIRE_EQ("foo", up->key);
+            REQUIRE_EQ("unknown", toString(up->table));
+        }
+    }
+}
+
 TEST_CASE_FIXTURE(BuiltinsFixture, "call_an_incompatible_function_after_using_typeguard")
 {
     CheckResult result = check(R"(
@@ -499,7 +592,10 @@ TEST_CASE_FIXTURE(Fixture, "lvalue_is_not_nil")
     LUAU_REQUIRE_NO_ERRORS(result);
 
     CHECK_EQ(toString(requireTypeAtPosition({3, 28})), "number | string");    // a ~= nil
-    CHECK_EQ(toString(requireTypeAtPosition({5, 28})), "(number | string)?"); // a == nil
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ(toString(requireTypeAtPosition({5, 28})), "nil"); // a == nil :)
+    else
+        CHECK_EQ(toString(requireTypeAtPosition({5, 28})), "(number | string)?"); // a == nil
 }
 
 TEST_CASE_FIXTURE(Fixture, "free_type_is_equal_to_an_lvalue")
@@ -515,9 +611,9 @@ TEST_CASE_FIXTURE(Fixture, "free_type_is_equal_to_an_lvalue")
     LUAU_REQUIRE_NO_ERRORS(result);
 
     if (FFlag::DebugLuauDeferredConstraintResolution)
-        CHECK_EQ(toString(requireTypeAtPosition({3, 33})), "unknown");       // a == b
+        CHECK_EQ(toString(requireTypeAtPosition({3, 33})), "unknown"); // a == b
     else
-        CHECK_EQ(toString(requireTypeAtPosition({3, 33})), "a");       // a == b
+        CHECK_EQ(toString(requireTypeAtPosition({3, 33})), "a"); // a == b
 
     CHECK_EQ(toString(requireTypeAtPosition({3, 36})), "string?"); // a == b
 }
@@ -967,7 +1063,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "type_comparison_ifelse_expression")
 
     CHECK_EQ("number", toString(requireTypeAtPosition({10, 49})));
     if (FFlag::DebugLuauDeferredConstraintResolution)
-        CHECK_EQ("unknown & ~number", toString(requireTypeAtPosition({10, 66})));
+        CHECK_EQ("~number", toString(requireTypeAtPosition({10, 66})));
     else
         CHECK_EQ("unknown", toString(requireTypeAtPosition({10, 66})));
 }
@@ -1497,7 +1593,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "refine_unknowns")
     if (FFlag::DebugLuauDeferredConstraintResolution)
     {
         CHECK_EQ("string", toString(requireTypeAtPosition({3, 28})));
-        CHECK_EQ("unknown & ~string", toString(requireTypeAtPosition({5, 28})));
+        CHECK_EQ("~string", toString(requireTypeAtPosition({5, 28})));
     }
     else
     {
@@ -1933,6 +2029,8 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "refine_unknown_to_table")
                     return i, v
                 end
             end
+
+            error("")
         end
     )");
 
@@ -2018,6 +2116,60 @@ end
 )");
     TypeId t = requireTypeAtPosition({3, 18});
     CHECK("string" == toString(t));
+}
+
+TEST_CASE_FIXTURE(RefinementClassFixture, "mutate_prop_of_some_refined_symbol")
+{
+    CheckResult result = check(R"(
+        local function instances(): {Instance} error("") end
+        local function vec3(x, y, z): Vector3 error("") end
+
+        for _, object in ipairs(instances()) do
+            if object:IsA("Part") then
+                object.Position = vec3(1, 2, 3)
+            end
+        end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(RefinementClassFixture, "mutate_prop_of_some_refined_symbol_2")
+{
+    CheckResult result = check(R"(
+        type Result<T, E> = never
+            | { tag: "ok", value: T }
+            | { tag: "err", error: E }
+
+        local function results(): {Result<number, string>} error("") end
+
+        for _, res in ipairs(results()) do
+            if res.tag == "ok" then
+                res.value = 7
+            end
+        end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "ensure_t_after_return_references_all_reachable_points")
+{
+    CheckResult result = check(R"(
+        local t = {}
+
+        local function f(k: string)
+            if t[k] ~= nil then
+                return
+            end
+
+            t[k] = 5
+        end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+
+    CHECK_EQ("{ [string]: number }", toString(requireTypeAtPosition({8, 12}), {true}));
 }
 
 TEST_SUITE_END();

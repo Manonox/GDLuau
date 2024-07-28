@@ -1,7 +1,10 @@
 // This file is part of the Luau programming language and is licensed under MIT License; see LICENSE.txt for details
 #pragma once
 
+#include "Luau/Common.h"
 #include "Luau/DenseHash.h"
+
+LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
 
 namespace Luau
 {
@@ -47,6 +50,17 @@ public:
     {
         for (Iterator it = begin; it != end; ++it)
             insert(*it);
+    }
+
+    void erase(T&& element)
+    {
+        bool& entry = mapping[element];
+
+        if (entry)
+        {
+            entry = false;
+            entryCount--;
+        }
     }
 
     void erase(const T& element)
@@ -124,10 +138,13 @@ public:
         using difference_type = ptrdiff_t;
         using iterator_category = std::forward_iterator_tag;
 
-        const_iterator(typename Impl::const_iterator impl, typename Impl::const_iterator end)
-            : impl(impl)
-            , end(end)
-        {}
+        const_iterator(typename Impl::const_iterator impl_, typename Impl::const_iterator end_)
+            : impl(impl_)
+            , end(end_)
+        {
+            while (impl != end && impl->second == false)
+                ++impl;
+        }
 
         const T& operator*() const
         {
@@ -138,7 +155,6 @@ public:
         {
             return &impl->first;
         }
-
 
         bool operator==(const const_iterator& other) const
         {
@@ -168,6 +184,7 @@ public:
             ++*this;
             return res;
         }
+
     private:
         typename Impl::const_iterator impl;
         typename Impl::const_iterator end;

@@ -4,6 +4,7 @@
 #include "Luau/ToString.h"
 #include "Luau/TypePack.h"
 #include "Luau/Type.h"
+#include "Luau/TypeFunction.h"
 #include "Luau/StringUtils.h"
 
 #include <unordered_map>
@@ -261,14 +262,6 @@ void StateDot::visitChildren(TypeId ty, int index)
                     visitChild(t.upperBound, index, "[upperBound]");
             }
         }
-        else if constexpr (std::is_same_v<T, LocalType>)
-        {
-            formatAppend(result, "LocalType");
-            finishNodeLabel(ty);
-            finishNode();
-
-            visitChild(t.domain, 1, "[domain]");
-        }
         else if constexpr (std::is_same_v<T, AnyType>)
         {
             formatAppend(result, "AnyType %d", index);
@@ -350,11 +343,17 @@ void StateDot::visitChildren(TypeId ty, int index)
 
             visitChild(t.ty, index, "[negated]");
         }
-        else if constexpr (std::is_same_v<T, TypeFamilyInstanceType>)
+        else if constexpr (std::is_same_v<T, TypeFunctionInstanceType>)
         {
-            formatAppend(result, "TypeFamilyInstanceType %d", index);
+            formatAppend(result, "TypeFunctionInstanceType %s %d", t.function->name.c_str(), index);
             finishNodeLabel(ty);
             finishNode();
+
+            for (TypeId tyParam : t.typeArguments)
+                visitChild(tyParam, index);
+
+            for (TypePackId tpParam : t.packArguments)
+                visitChild(tpParam, index);
         }
         else
             static_assert(always_false_v<T>, "unknown type kind");

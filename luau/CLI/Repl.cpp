@@ -41,11 +41,12 @@
 
 LUAU_FASTFLAG(DebugLuauTimeTracing)
 
-LUAU_FASTFLAGVARIABLE(LuauUpdatedRequireByStringSemantics, false)
 
 constexpr int MaxTraversalLimit = 50;
 
 static bool codegen = false;
+static int program_argc = 0;
+char** program_argv = nullptr;
 
 // Ctrl-C handling
 static void sigintCallback(lua_State* L, int gc)
@@ -87,6 +88,7 @@ static Luau::CompileOptions copts()
     Luau::CompileOptions result = {};
     result.optimizationLevel = globalOptions.optimizationLevel;
     result.debugLevel = globalOptions.debugLevel;
+    result.typeInfoLevel = 1;
     result.coverageLevel = coverageActive() ? 2 : 0;
 
     return result;
@@ -119,129 +121,63 @@ static int finishrequire(lua_State* L)
 
 static int lua_require(lua_State* L)
 {
-    if (FFlag::LuauUpdatedRequireByStringSemantics)
-    {
-        std::string name = luaL_checkstring(L, 1);
+    std::string name = luaL_checkstring(L, 1);
 
-        RequireResolver::ResolvedRequire resolvedRequire = RequireResolver::resolveRequire(L, std::move(name));
+    RequireResolver::ResolvedRequire resolvedRequire = RequireResolver::resolveRequire(L, std::move(name));
 
-        if (resolvedRequire.status == RequireResolver::ModuleStatus::Cached)
-            return finishrequire(L);
-        else if (resolvedRequire.status == RequireResolver::ModuleStatus::NotFound)
-            luaL_errorL(L, "error requiring module");
-
-        // module needs to run in a new thread, isolated from the rest
-        // note: we create ML on main thread so that it doesn't inherit environment of L
-        lua_State* GL = lua_mainthread(L);
-        lua_State* ML = lua_newthread(GL);
-        lua_xmove(GL, L, 1);
-
-        // new thread needs to have the globals sandboxed
-        luaL_sandboxthread(ML);
-
-        // now we can compile & run module on the new thread
-        std::string bytecode = Luau::compile(resolvedRequire.sourceCode, copts());
-        if (luau_load(ML, resolvedRequire.chunkName.c_str(), bytecode.data(), bytecode.size(), 0) == 0)
-        {
-            if (codegen)
-                Luau::CodeGen::compile(ML, -1);
-
-            if (coverageActive())
-                coverageTrack(ML, -1);
-
-            int status = lua_resume(ML, L, 0);
-
-            if (status == 0)
-            {
-                if (lua_gettop(ML) == 0)
-                    lua_pushstring(ML, "module must return a value");
-                else if (!lua_istable(ML, -1) && !lua_isfunction(ML, -1))
-                    lua_pushstring(ML, "module must return a table or function");
-            }
-            else if (status == LUA_YIELD)
-            {
-                lua_pushstring(ML, "module can not yield");
-            }
-            else if (!lua_isstring(ML, -1))
-            {
-                lua_pushstring(ML, "unknown error while running module");
-            }
-        }
-
-        // there's now a return value on top of ML; L stack: _MODULES ML
-        lua_xmove(ML, L, 1);
-        lua_pushvalue(L, -1);
-        lua_setfield(L, -4, resolvedRequire.absolutePath.c_str());
-
-        // L stack: _MODULES ML result
+    if (resolvedRequire.status == RequireResolver::ModuleStatus::Cached)
         return finishrequire(L);
-    }
-    else
+    else if (resolvedRequire.status == RequireResolver::ModuleStatus::NotFound)
+        luaL_errorL(L, "error requiring module");
+
+    // module needs to run in a new thread, isolated from the rest
+    // note: we create ML on main thread so that it doesn't inherit environment of L
+    lua_State* GL = lua_mainthread(L);
+    lua_State* ML = lua_newthread(GL);
+    lua_xmove(GL, L, 1);
+
+    // new thread needs to have the globals sandboxed
+    luaL_sandboxthread(ML);
+
+    // now we can compile & run module on the new thread
+    std::string bytecode = Luau::compile(resolvedRequire.sourceCode, copts());
+    if (luau_load(ML, resolvedRequire.chunkName.c_str(), bytecode.data(), bytecode.size(), 0) == 0)
     {
-        std::string name = luaL_checkstring(L, 1);
-        std::string chunkname = "=" + name;
-
-        luaL_findtable(L, LUA_REGISTRYINDEX, "_MODULES", 1);
-
-        // return the module from the cache
-        lua_getfield(L, -1, name.c_str());
-        if (!lua_isnil(L, -1))
+        if (codegen)
         {
-            // L stack: _MODULES result
-            return finishrequire(L);
+            Luau::CodeGen::CompilationOptions nativeOptions;
+            Luau::CodeGen::compile(ML, -1, nativeOptions);
         }
 
-        lua_pop(L, 1);
+        if (coverageActive())
+            coverageTrack(ML, -1);
 
-        std::optional<std::string> source = readFile(name + ".luau");
-        if (!source)
+        int status = lua_resume(ML, L, 0);
+
+        if (status == 0)
         {
-            source = readFile(name + ".lua"); // try .lua if .luau doesn't exist
-            if (!source)
-                luaL_argerrorL(L, 1, ("error loading " + name).c_str()); // if neither .luau nor .lua exist, we have an error
+            if (lua_gettop(ML) == 0)
+                lua_pushstring(ML, "module must return a value");
+            else if (!lua_istable(ML, -1) && !lua_isfunction(ML, -1))
+                lua_pushstring(ML, "module must return a table or function");
         }
-
-        // module needs to run in a new thread, isolated from the rest
-        // note: we create ML on main thread so that it doesn't inherit environment of L
-        lua_State* GL = lua_mainthread(L);
-        lua_State* ML = lua_newthread(GL);
-        lua_xmove(GL, L, 1);
-        // new thread needs to have the globals sandboxed
-        luaL_sandboxthread(ML);
-
-        // now we can compile & run module on the new thread
-        std::string bytecode = Luau::compile(*source, copts());
-        if (luau_load(ML, chunkname.c_str(), bytecode.data(), bytecode.size(), 0) == 0)
+        else if (status == LUA_YIELD)
         {
-            if (codegen)
-                Luau::CodeGen::compile(ML, -1);
-            if (coverageActive())
-                coverageTrack(ML, -1);
-            int status = lua_resume(ML, L, 0);
-            if (status == 0)
-            {
-                if (lua_gettop(ML) == 0)
-                    lua_pushstring(ML, "module must return a value");
-                else if (!lua_istable(ML, -1) && !lua_isfunction(ML, -1))
-                    lua_pushstring(ML, "module must return a table or function");
-            }
-            else if (status == LUA_YIELD)
-            {
-                lua_pushstring(ML, "module can not yield");
-            }
-            else if (!lua_isstring(ML, -1))
-            {
-                lua_pushstring(ML, "unknown error while running module");
-            }
+            lua_pushstring(ML, "module can not yield");
         }
-        // there's now a return value on top of ML; L stack: _MODULES ML
-        lua_xmove(ML, L, 1);
-        lua_pushvalue(L, -1);
-        lua_setfield(L, -4, name.c_str());
-
-        // L stack: _MODULES ML result
-        return finishrequire(L);
+        else if (!lua_isstring(ML, -1))
+        {
+            lua_pushstring(ML, "unknown error while running module");
+        }
     }
+
+    // there's now a return value on top of ML; L stack: _MODULES ML
+    lua_xmove(ML, L, 1);
+    lua_pushvalue(L, -1);
+    lua_setfield(L, -4, resolvedRequire.absolutePath.c_str());
+
+    // L stack: _MODULES ML result
+    return finishrequire(L);
 }
 
 static int lua_collectgarbage(lua_State* L)
@@ -318,8 +254,18 @@ void setupState(lua_State* L)
     luaL_sandbox(L);
 }
 
+void setupArguments(lua_State* L, int argc, char** argv)
+{
+    lua_checkstack(L, argc);
+
+    for (int i = 0; i < argc; ++i)
+        lua_pushstring(L, argv[i]);
+}
+
 std::string runCode(lua_State* L, const std::string& source)
 {
+    lua_checkstack(L, LUA_MINSTACK);
+
     std::string bytecode = Luau::compile(source, copts());
 
     if (luau_load(L, "=stdin", bytecode.data(), bytecode.size(), 0) != 0)
@@ -489,6 +435,8 @@ static void completeIndexer(lua_State* L, const std::string& editBuffer, const A
 {
     std::string_view lookup = editBuffer;
     bool completeOnlyFunctions = false;
+
+    lua_checkstack(L, LUA_MINSTACK);
 
     // Push the global variable table to begin the search
     lua_pushvalue(L, LUA_GLOBALSINDEX);
@@ -663,12 +611,16 @@ static bool runFile(const char* name, lua_State* GL, bool repl)
     if (luau_load(L, chunkname.c_str(), bytecode.data(), bytecode.size(), 0) == 0)
     {
         if (codegen)
-            Luau::CodeGen::compile(L, -1);
+        {
+            Luau::CodeGen::CompilationOptions nativeOptions;
+            Luau::CodeGen::compile(L, -1, nativeOptions);
+        }
 
         if (coverageActive())
             coverageTrack(L, -1);
 
-        status = lua_resume(L, NULL, 0);
+        setupArguments(L, program_argc, program_argv);
+        status = lua_resume(L, NULL, program_argc);
     }
     else
     {
@@ -704,7 +656,7 @@ static bool runFile(const char* name, lua_State* GL, bool repl)
 
 static void displayHelp(const char* argv0)
 {
-    printf("Usage: %s [options] [file list]\n", argv0);
+    printf("Usage: %s [options] [file list] [-a] [arg list]\n", argv0);
     printf("\n");
     printf("When file list is omitted, an interactive REPL is started instead.\n");
     printf("\n");
@@ -717,6 +669,7 @@ static void displayHelp(const char* argv0)
     printf("  --profile[=N]: profile the code using N Hz sampling (default 10000) and output results to profile.out\n");
     printf("  --timetrace: record compiler time tracing information into trace.json\n");
     printf("  --codegen: execute code using native code generation\n");
+    printf("  --program-args,-a: declare start of arguments to be passed to the Luau program\n");
 }
 
 static int assertionHandler(const char* expr, const char* file, int line, const char* function)
@@ -739,6 +692,7 @@ int replMain(int argc, char** argv)
     bool coverage = false;
     bool interactive = false;
     bool codegenPerf = false;
+    int program_args = argc;
 
     for (int i = 1; i < argc; i++)
     {
@@ -800,6 +754,11 @@ int replMain(int argc, char** argv)
         {
             setLuauFlags(argv[i] + 9);
         }
+        else if (strcmp(argv[i], "--program-args") == 0 || strcmp(argv[i], "-a") == 0)
+        {
+            program_args = i + 1;
+            break;
+        }
         else if (argv[i][0] == '-')
         {
             fprintf(stderr, "Error: Unrecognized option '%s'.\n\n", argv[i]);
@@ -807,6 +766,10 @@ int replMain(int argc, char** argv)
             return 1;
         }
     }
+
+    program_argc = argc - program_args;
+    program_argv = &argv[program_args];
+
 
 #if !defined(LUAU_ENABLE_TIME_TRACE)
     if (FFlag::DebugLuauTimeTracing)

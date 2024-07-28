@@ -70,7 +70,7 @@ static const char* getTagName(uint8_t tag)
     case LUA_TDEADKEY:
         return "tdeadkey";
     default:
-        LUAU_ASSERT(!"Unknown type tag");
+        CODEGEN_ASSERT(!"Unknown type tag");
         LUAU_UNREACHABLE();
     }
 }
@@ -89,6 +89,8 @@ const char* getCmdName(IrCmd cmd)
         return "LOAD_DOUBLE";
     case IrCmd::LOAD_INT:
         return "LOAD_INT";
+    case IrCmd::LOAD_FLOAT:
+        return "LOAD_FLOAT";
     case IrCmd::LOAD_TVALUE:
         return "LOAD_TVALUE";
     case IrCmd::LOAD_ENV:
@@ -149,6 +151,18 @@ const char* getCmdName(IrCmd cmd)
         return "SQRT_NUM";
     case IrCmd::ABS_NUM:
         return "ABS_NUM";
+    case IrCmd::SIGN_NUM:
+        return "SIGN_NUM";
+    case IrCmd::ADD_VEC:
+        return "ADD_VEC";
+    case IrCmd::SUB_VEC:
+        return "SUB_VEC";
+    case IrCmd::MUL_VEC:
+        return "MUL_VEC";
+    case IrCmd::DIV_VEC:
+        return "DIV_VEC";
+    case IrCmd::UNM_VEC:
+        return "UNM_VEC";
     case IrCmd::NOT_ANY:
         return "NOT_ANY";
     case IrCmd::CMP_ANY:
@@ -185,6 +199,8 @@ const char* getCmdName(IrCmd cmd)
         return "TRY_NUM_TO_INDEX";
     case IrCmd::TRY_CALL_FASTGETTM:
         return "TRY_CALL_FASTGETTM";
+    case IrCmd::NEW_USERDATA:
+        return "NEW_USERDATA";
     case IrCmd::INT_TO_NUM:
         return "INT_TO_NUM";
     case IrCmd::UINT_TO_NUM:
@@ -193,6 +209,10 @@ const char* getCmdName(IrCmd cmd)
         return "NUM_TO_INT";
     case IrCmd::NUM_TO_UINT:
         return "NUM_TO_UINT";
+    case IrCmd::NUM_TO_VEC:
+        return "NUM_TO_VEC";
+    case IrCmd::TAG_VECTOR:
+        return "TAG_VECTOR";
     case IrCmd::ADJUST_STACK_TO_REG:
         return "ADJUST_STACK_TO_REG";
     case IrCmd::ADJUST_STACK_TO_TOP:
@@ -239,6 +259,8 @@ const char* getCmdName(IrCmd cmd)
         return "CHECK_NODE_VALUE";
     case IrCmd::CHECK_BUFFER_LEN:
         return "CHECK_BUFFER_LEN";
+    case IrCmd::CHECK_USERDATA_TAG:
+        return "CHECK_USERDATA_TAG";
     case IrCmd::INTERRUPT:
         return "INTERRUPT";
     case IrCmd::CHECK_GC:
@@ -395,6 +417,7 @@ void toString(IrToStringContext& ctx, const IrInst& inst, uint32_t index)
     checkOp(inst.d, ", ");
     checkOp(inst.e, ", ");
     checkOp(inst.f, ", ");
+    checkOp(inst.g, ", ");
 }
 
 void toString(IrToStringContext& ctx, const IrBlock& block, uint32_t index)
@@ -415,7 +438,7 @@ void toString(IrToStringContext& ctx, IrOp op)
         toString(ctx.result, ctx.constants[op.index]);
         break;
     case IrOpKind::Condition:
-        LUAU_ASSERT(op.index < uint32_t(IrCondition::Count));
+        CODEGEN_ASSERT(op.index < uint32_t(IrCondition::Count));
         ctx.result.append(textForCondition[op.index]);
         break;
     case IrOpKind::Inst:
@@ -464,8 +487,19 @@ void toString(std::string& result, IrConst constant)
     }
 }
 
-const char* getBytecodeTypeName(uint8_t type)
+const char* getBytecodeTypeName(uint8_t type, const char* const* userdataTypes)
 {
+    // Optional bit should be handled externally
+    type = type & ~LBC_TYPE_OPTIONAL_BIT;
+
+    if (type >= LBC_TYPE_TAGGED_USERDATA_BASE && type < LBC_TYPE_TAGGED_USERDATA_END)
+    {
+        if (userdataTypes)
+            return userdataTypes[type - LBC_TYPE_TAGGED_USERDATA_BASE];
+
+        return "userdata";
+    }
+
     switch (type)
     {
     case LBC_TYPE_NIL:
@@ -492,17 +526,23 @@ const char* getBytecodeTypeName(uint8_t type)
         return "any";
     }
 
-    LUAU_ASSERT(!"Unhandled type in getBytecodeTypeName");
+    CODEGEN_ASSERT(!"Unhandled type in getBytecodeTypeName");
     return nullptr;
 }
 
-void toString(std::string& result, const BytecodeTypes& bcTypes)
+void toString(std::string& result, const BytecodeTypes& bcTypes, const char* const* userdataTypes)
 {
+    append(result, "%s%s", getBytecodeTypeName(bcTypes.result, userdataTypes), (bcTypes.result & LBC_TYPE_OPTIONAL_BIT) != 0 ? "?" : "");
+    append(result, " <- ");
+    append(result, "%s%s", getBytecodeTypeName(bcTypes.a, userdataTypes), (bcTypes.a & LBC_TYPE_OPTIONAL_BIT) != 0 ? "?" : "");
+    append(result, ", ");
+    append(result, "%s%s", getBytecodeTypeName(bcTypes.b, userdataTypes), (bcTypes.b & LBC_TYPE_OPTIONAL_BIT) != 0 ? "?" : "");
+
     if (bcTypes.c != LBC_TYPE_ANY)
-        append(result, "%s <- %s, %s, %s", getBytecodeTypeName(bcTypes.result), getBytecodeTypeName(bcTypes.a), getBytecodeTypeName(bcTypes.b),
-            getBytecodeTypeName(bcTypes.c));
-    else
-        append(result, "%s <- %s, %s", getBytecodeTypeName(bcTypes.result), getBytecodeTypeName(bcTypes.a), getBytecodeTypeName(bcTypes.b));
+    {
+        append(result, ", ");
+        append(result, "%s%s", getBytecodeTypeName(bcTypes.c, userdataTypes), (bcTypes.c & LBC_TYPE_OPTIONAL_BIT) != 0 ? "?" : "");
+    }
 }
 
 static void appendBlockSet(IrToStringContext& ctx, BlockIteratorWrapper blocks)
@@ -554,7 +594,7 @@ static RegisterSet getJumpTargetExtraLiveIn(IrToStringContext& ctx, const IrBloc
     const RegisterSet& defRs = ctx.cfg.in[blockIdx];
 
     // Find first block argument, for guard instructions (isNonTerminatingJump), that's the first and only one
-    LUAU_ASSERT(isNonTerminatingJump(inst.cmd));
+    CODEGEN_ASSERT(isNonTerminatingJump(inst.cmd));
     IrOp op = inst.a;
 
     if (inst.b.kind == IrOpKind::Block)
@@ -567,6 +607,8 @@ static RegisterSet getJumpTargetExtraLiveIn(IrToStringContext& ctx, const IrBloc
         op = inst.e;
     else if (inst.f.kind == IrOpKind::Block)
         op = inst.f;
+    else if (inst.g.kind == IrOpKind::Block)
+        op = inst.g;
 
     if (op.kind == IrOpKind::Block && op.index < ctx.cfg.in.size())
     {
@@ -581,13 +623,14 @@ static RegisterSet getJumpTargetExtraLiveIn(IrToStringContext& ctx, const IrBloc
     return extraRs;
 }
 
-void toStringDetailed(IrToStringContext& ctx, const IrBlock& block, uint32_t blockIdx, const IrInst& inst, uint32_t instIdx, bool includeUseInfo)
+void toStringDetailed(
+    IrToStringContext& ctx, const IrBlock& block, uint32_t blockIdx, const IrInst& inst, uint32_t instIdx, IncludeUseInfo includeUseInfo)
 {
     size_t start = ctx.result.size();
 
     toString(ctx, inst, instIdx);
 
-    if (includeUseInfo)
+    if (includeUseInfo == IncludeUseInfo::Yes)
     {
         padToDetailColumn(ctx.result, start);
 
@@ -624,11 +667,11 @@ void toStringDetailed(IrToStringContext& ctx, const IrBlock& block, uint32_t blo
     }
 }
 
-void toStringDetailed(
-    IrToStringContext& ctx, const IrBlock& block, uint32_t blockIdx, bool includeUseInfo, bool includeCfgInfo, bool includeRegFlowInfo)
+void toStringDetailed(IrToStringContext& ctx, const IrBlock& block, uint32_t blockIdx, IncludeUseInfo includeUseInfo, IncludeCfgInfo includeCfgInfo,
+    IncludeRegFlowInfo includeRegFlowInfo)
 {
     // Report captured registers for entry block
-    if (includeRegFlowInfo && block.useCount == 0 && block.kind != IrBlockKind::Dead && ctx.cfg.captured.regs.any())
+    if (includeRegFlowInfo == IncludeRegFlowInfo::Yes && block.useCount == 0 && block.kind != IrBlockKind::Dead && ctx.cfg.captured.regs.any())
     {
         append(ctx.result, "; captured regs: ");
         appendRegisterSet(ctx, ctx.cfg.captured, ", ");
@@ -640,7 +683,7 @@ void toStringDetailed(
     toString(ctx, block, blockIdx);
     append(ctx.result, ":");
 
-    if (includeUseInfo)
+    if (includeUseInfo == IncludeUseInfo::Yes)
     {
         padToDetailColumn(ctx.result, start);
 
@@ -652,7 +695,7 @@ void toStringDetailed(
     }
 
     // Predecessor list
-    if (includeCfgInfo && blockIdx < ctx.cfg.predecessorsOffsets.size())
+    if (includeCfgInfo == IncludeCfgInfo::Yes && blockIdx < ctx.cfg.predecessorsOffsets.size())
     {
         BlockIteratorWrapper pred = predecessors(ctx.cfg, blockIdx);
 
@@ -666,7 +709,7 @@ void toStringDetailed(
     }
 
     // Successor list
-    if (includeCfgInfo && blockIdx < ctx.cfg.successorsOffsets.size())
+    if (includeCfgInfo == IncludeCfgInfo::Yes && blockIdx < ctx.cfg.successorsOffsets.size())
     {
         BlockIteratorWrapper succ = successors(ctx.cfg, blockIdx);
 
@@ -680,7 +723,7 @@ void toStringDetailed(
     }
 
     // Live-in VM regs
-    if (includeRegFlowInfo && blockIdx < ctx.cfg.in.size())
+    if (includeRegFlowInfo == IncludeRegFlowInfo::Yes && blockIdx < ctx.cfg.in.size())
     {
         const RegisterSet& in = ctx.cfg.in[blockIdx];
 
@@ -693,7 +736,7 @@ void toStringDetailed(
     }
 
     // Live-out VM regs
-    if (includeRegFlowInfo && blockIdx < ctx.cfg.out.size())
+    if (includeRegFlowInfo == IncludeRegFlowInfo::Yes && blockIdx < ctx.cfg.out.size())
     {
         const RegisterSet& out = ctx.cfg.out[blockIdx];
 
@@ -706,7 +749,7 @@ void toStringDetailed(
     }
 }
 
-std::string toString(const IrFunction& function, bool includeUseInfo)
+std::string toString(const IrFunction& function, IncludeUseInfo includeUseInfo)
 {
     std::string result;
     IrToStringContext ctx{result, function.blocks, function.constants, function.cfg};
@@ -718,7 +761,7 @@ std::string toString(const IrFunction& function, bool includeUseInfo)
         if (block.kind == IrBlockKind::Dead)
             continue;
 
-        toStringDetailed(ctx, block, uint32_t(i), includeUseInfo, /*includeCfgInfo*/ true, /*includeRegFlowInfo*/ true);
+        toStringDetailed(ctx, block, uint32_t(i), includeUseInfo, IncludeCfgInfo::Yes, IncludeRegFlowInfo::Yes);
 
         if (block.start == ~0u)
         {
@@ -747,7 +790,7 @@ std::string toString(const IrFunction& function, bool includeUseInfo)
 
 std::string dump(const IrFunction& function)
 {
-    std::string result = toString(function, /* includeUseInfo */ true);
+    std::string result = toString(function, IncludeUseInfo::Yes);
 
     printf("%s\n", result.c_str());
 
@@ -850,6 +893,7 @@ std::string toDot(const IrFunction& function, bool includeInst)
             checkOp(inst.d);
             checkOp(inst.e);
             checkOp(inst.f);
+            checkOp(inst.g);
         }
     }
 

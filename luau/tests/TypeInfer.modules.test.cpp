@@ -12,7 +12,6 @@
 
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
-LUAU_FASTFLAG(LuauTinyControlFlowAnalysis);
 
 using namespace Luau;
 
@@ -414,7 +413,7 @@ local b: B.T = a
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
     if (FFlag::DebugLuauDeferredConstraintResolution)
-        CHECK(toString(result.errors.at(0)) == "Type 'a' could not be converted into 'T'; at [\"x\"], number is not exactly string");
+        CHECK(toString(result.errors.at(0)) == "Type 'T' could not be converted into 'T'; at [read \"x\"], number is not exactly string");
     else
     {
         const std::string expected = R"(Type 'T' from 'game/A' could not be converted into 'T' from 'game/B'
@@ -455,7 +454,7 @@ local b: B.T = a
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
     if (FFlag::DebugLuauDeferredConstraintResolution)
-        CHECK(toString(result.errors.at(0)) == "Type 'a' could not be converted into 'T'; at [\"x\"], number is not exactly string");
+        CHECK(toString(result.errors.at(0)) == "Type 'T' could not be converted into 'T'; at [read \"x\"], number is not exactly string");
     else
     {
         const std::string expected = R"(Type 'T' from 'game/B' could not be converted into 'T' from 'game/C'
@@ -492,8 +491,6 @@ return unpack(l0[_])
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "check_imported_module_names")
 {
-    ScopedFastFlag sff{FFlag::LuauTinyControlFlowAnalysis, true};
-
     fileResolver.source["game/A"] = R"(
 return function(...) end
     )";

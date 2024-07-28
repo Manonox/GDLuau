@@ -3,12 +3,10 @@
 
 #include "Luau/ApplyTypeFunction.h"
 #include "Luau/Cancellation.h"
-#include "Luau/Clone.h"
 #include "Luau/Common.h"
 #include "Luau/Instantiation.h"
 #include "Luau/ModuleResolver.h"
 #include "Luau/Normalize.h"
-#include "Luau/Parser.h"
 #include "Luau/Quantify.h"
 #include "Luau/RecursionCounter.h"
 #include "Luau/Scope.h"
@@ -35,11 +33,11 @@ LUAU_FASTFLAG(LuauKnowsTheDataModel3)
 LUAU_FASTFLAGVARIABLE(DebugLuauFreezeDuringUnification, false)
 LUAU_FASTFLAGVARIABLE(DebugLuauSharedSelf, false)
 LUAU_FASTFLAG(LuauInstantiateInSubtyping)
-LUAU_FASTFLAGVARIABLE(LuauTinyControlFlowAnalysis, false)
-LUAU_FASTFLAGVARIABLE(LuauLoopControlFlowAnalysis, false)
 LUAU_FASTFLAGVARIABLE(LuauAlwaysCommitInferencesOfFunctionCalls, false)
 LUAU_FASTFLAGVARIABLE(LuauRemoveBadRelationalOperatorWarning, false)
-LUAU_FASTFLAGVARIABLE(LuauForbidAliasNamedTypeof, false)
+LUAU_FASTFLAGVARIABLE(LuauOkWithIteratingOverTableProperties, false)
+LUAU_FASTFLAGVARIABLE(LuauReusableSubstitutions, false)
+LUAU_FASTFLAG(LuauDeclarationExtraPropData)
 
 namespace Luau
 {
@@ -216,6 +214,7 @@ TypeChecker::TypeChecker(const ScopePtr& globalScope, ModuleResolver* resolver, 
     , iceHandler(iceHandler)
     , unifierState(iceHandler)
     , normalizer(nullptr, builtinTypes, NotNull{&unifierState})
+    , reusableInstantiation(TxnLog::empty(), nullptr, builtinTypes, {}, nullptr)
     , nilType(builtinTypes->nilType)
     , numberType(builtinTypes->numberType)
     , stringType(builtinTypes->stringType)
@@ -350,20 +349,17 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStat& program)
     else if (auto repeat = program.as<AstStatRepeat>())
         return check(scope, *repeat);
     else if (program.is<AstStatBreak>())
-        return FFlag::LuauLoopControlFlowAnalysis ? ControlFlow::Breaks : ControlFlow::None;
+        return ControlFlow::Breaks;
     else if (program.is<AstStatContinue>())
-        return FFlag::LuauLoopControlFlowAnalysis ? ControlFlow::Continues : ControlFlow::None;
+        return ControlFlow::Continues;
     else if (auto return_ = program.as<AstStatReturn>())
         return check(scope, *return_);
     else if (auto expr = program.as<AstStatExpr>())
     {
         checkExprPack(scope, *expr->expr);
 
-        if (FFlag::LuauTinyControlFlowAnalysis)
-        {
-            if (auto call = expr->expr->as<AstExprCall>(); call && doesCallError(call))
-                return ControlFlow::Throws;
-        }
+        if (auto call = expr->expr->as<AstExprCall>(); call && doesCallError(call))
+            return ControlFlow::Throws;
 
         return ControlFlow::None;
     }
@@ -668,7 +664,7 @@ LUAU_NOINLINE void TypeChecker::checkBlockTypeAliases(const ScopePtr& scope, std
     {
         if (const auto& typealias = stat->as<AstStatTypeAlias>())
         {
-            if (typealias->name == kParseNameError || (FFlag::LuauForbidAliasNamedTypeof && typealias->name == "typeof"))
+            if (typealias->name == kParseNameError || typealias->name == "typeof")
                 continue;
 
             auto& bindings = typealias->exported ? scope->exportedTypeBindings : scope->privateTypeBindings;
@@ -740,41 +736,25 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatIf& statement
     ScopePtr thenScope = childScope(scope, statement.thenbody->location);
     resolve(result.predicates, thenScope, true);
 
-    if (FFlag::LuauTinyControlFlowAnalysis)
-    {
-        ScopePtr elseScope = childScope(scope, statement.elsebody ? statement.elsebody->location : statement.location);
-        resolve(result.predicates, elseScope, false);
+    ScopePtr elseScope = childScope(scope, statement.elsebody ? statement.elsebody->location : statement.location);
+    resolve(result.predicates, elseScope, false);
 
-        ControlFlow thencf = check(thenScope, *statement.thenbody);
-        ControlFlow elsecf = ControlFlow::None;
-        if (statement.elsebody)
-            elsecf = check(elseScope, *statement.elsebody);
+    ControlFlow thencf = check(thenScope, *statement.thenbody);
+    ControlFlow elsecf = ControlFlow::None;
+    if (statement.elsebody)
+        elsecf = check(elseScope, *statement.elsebody);
 
-        if (thencf != ControlFlow::None && elsecf == ControlFlow::None)
-            scope->inheritRefinements(elseScope);
-        else if (thencf == ControlFlow::None && elsecf != ControlFlow::None)
-            scope->inheritRefinements(thenScope);
+    if (thencf != ControlFlow::None && elsecf == ControlFlow::None)
+        scope->inheritRefinements(elseScope);
+    else if (thencf == ControlFlow::None && elsecf != ControlFlow::None)
+        scope->inheritRefinements(thenScope);
 
-        if (FFlag::LuauLoopControlFlowAnalysis && thencf == elsecf)
-            return thencf;
-        else if (matches(thencf, ControlFlow::Returns | ControlFlow::Throws) && matches(elsecf, ControlFlow::Returns | ControlFlow::Throws))
-            return ControlFlow::Returns;
-        else
-            return ControlFlow::None;
-    }
+    if (thencf == elsecf)
+        return thencf;
+    else if (matches(thencf, ControlFlow::Returns | ControlFlow::Throws) && matches(elsecf, ControlFlow::Returns | ControlFlow::Throws))
+        return ControlFlow::Returns;
     else
-    {
-        check(thenScope, *statement.thenbody);
-
-        if (statement.elsebody)
-        {
-            ScopePtr elseScope = childScope(scope, statement.elsebody->location);
-            resolve(result.predicates, elseScope, false);
-            check(elseScope, *statement.elsebody);
-        }
-
         return ControlFlow::None;
-    }
 }
 
 template<typename Id>
@@ -906,12 +886,12 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatReturn& retur
         if (!errors.empty())
             currentModule->getModuleScope()->returnType = addTypePack({anyType});
 
-        return FFlag::LuauTinyControlFlowAnalysis ? ControlFlow::Returns : ControlFlow::None;
+        return ControlFlow::Returns;
     }
 
     unify(retPack, scope->returnType, scope, return_.location, CountMismatch::Context::Return);
 
-    return FFlag::LuauTinyControlFlowAnalysis ? ControlFlow::Returns : ControlFlow::None;
+    return ControlFlow::Returns;
 }
 
 template<typename Id>
@@ -1335,10 +1315,10 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatForIn& forin)
             for (size_t i = 2; i < varTypes.size(); ++i)
                 unify(nilType, varTypes[i], scope, forin.location);
         }
-        else if (isNonstrictMode())
+        else if (isNonstrictMode() || FFlag::LuauOkWithIteratingOverTableProperties)
         {
             for (TypeId var : varTypes)
-                unify(anyType, var, scope, forin.location);
+                unify(unknownType, var, scope, forin.location);
         }
         else
         {
@@ -1536,7 +1516,7 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatTypeAlias& ty
     if (name == kParseNameError)
         return ControlFlow::None;
 
-    if (FFlag::LuauForbidAliasNamedTypeof && name == "typeof")
+    if (name == "typeof")
     {
         reportError(typealias.location, GenericError{"Type aliases cannot be named typeof"});
         return ControlFlow::None;
@@ -1657,7 +1637,7 @@ void TypeChecker::prototype(const ScopePtr& scope, const AstStatTypeAlias& typea
     // If the alias is missing a name, we can't do anything with it.  Ignore it.
     // Also, typeof is not a valid type alias name.  We will report an error for
     // this in check()
-    if (name == kParseNameError || (FFlag::LuauForbidAliasNamedTypeof && name == "typeof"))
+    if (name == kParseNameError || name == "typeof")
         return;
 
     std::optional<TypeFun> binding;
@@ -1733,7 +1713,7 @@ void TypeChecker::prototype(const ScopePtr& scope, const AstStatDeclareClass& de
 
     Name className(declaredClass.name.value);
 
-    TypeId classTy = addType(ClassType(className, {}, superTy, std::nullopt, {}, {}, currentModule->name));
+    TypeId classTy = addType(ClassType(className, {}, superTy, std::nullopt, {}, {}, currentModule->name, declaredClass.location));
     ClassType* ctv = getMutable<ClassType>(classTy);
     TypeId metaTy = addType(TableType{TableState::Sealed, scope->level});
 
@@ -1784,12 +1764,55 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatDeclareClass&
                 ftv->argNames.insert(ftv->argNames.begin(), FunctionArgument{"self", {}});
                 ftv->argTypes = addTypePack(TypePack{{classTy}, ftv->argTypes});
                 ftv->hasSelf = true;
+
+                if (FFlag::LuauDeclarationExtraPropData)
+                {
+                    FunctionDefinition defn;
+
+                    defn.definitionModuleName = currentModule->name;
+                    defn.definitionLocation = prop.location;
+                    // No data is preserved for varargLocation
+                    defn.originalNameLocation = prop.nameLocation;
+
+                    ftv->definition = defn;
+                }
             }
         }
 
         if (assignTo.count(propName) == 0)
         {
-            assignTo[propName] = {propTy};
+            if (FFlag::LuauDeclarationExtraPropData)
+                assignTo[propName] = {propTy, /*deprecated*/ false, /*deprecatedSuggestion*/ "", prop.location};
+            else
+                assignTo[propName] = {propTy};
+        }
+        else if (FFlag::LuauDeclarationExtraPropData)
+        {
+            Luau::Property& prop = assignTo[propName];
+            TypeId currentTy = prop.type();
+
+            // We special-case this logic to keep the intersection flat; otherwise we
+            // would create a ton of nested intersection types.
+            if (const IntersectionType* itv = get<IntersectionType>(currentTy))
+            {
+                std::vector<TypeId> options = itv->parts;
+                options.push_back(propTy);
+                TypeId newItv = addType(IntersectionType{std::move(options)});
+
+                prop.readTy = newItv;
+                prop.writeTy = newItv;
+            }
+            else if (get<FunctionType>(currentTy))
+            {
+                TypeId intersection = addType(IntersectionType{{currentTy, propTy}});
+
+                prop.readTy = intersection;
+                prop.writeTy = intersection;
+            }
+            else
+            {
+                reportError(declaredClass.location, GenericError{format("Cannot overload non-function class member '%s'", propName.c_str())});
+            }
         }
         else
         {
@@ -1841,7 +1864,18 @@ ControlFlow TypeChecker::check(const ScopePtr& scope, const AstStatDeclareFuncti
 
     TypePackId argPack = resolveTypePack(funScope, global.params);
     TypePackId retPack = resolveTypePack(funScope, global.retTypes);
-    TypeId fnType = addType(FunctionType{funScope->level, std::move(genericTys), std::move(genericTps), argPack, retPack});
+
+    FunctionDefinition defn;
+
+    if (FFlag::LuauDeclarationExtraPropData)
+    {
+        defn.definitionModuleName = currentModule->name;
+        defn.definitionLocation = global.location;
+        defn.varargLocation = global.vararg ? std::make_optional(global.varargLocation) : std::nullopt;
+        defn.originalNameLocation = global.nameLocation;
+    }
+
+    TypeId fnType = addType(FunctionType{funScope->level, std::move(genericTys), std::move(genericTps), argPack, retPack, defn});
     FunctionType* ftv = getMutable<FunctionType>(fnType);
 
     ftv->argNames.reserve(global.paramNames.size);
@@ -2647,12 +2681,27 @@ static std::optional<bool> areEqComparable(NotNull<TypeArena> arena, NotNull<Nor
     if (isExempt(a) || isExempt(b))
         return true;
 
+    NormalizationResult nr;
+
     TypeId c = arena->addType(IntersectionType{{a, b}});
-    const NormalizedType* n = normalizer->normalize(c);
+    std::shared_ptr<const NormalizedType> n = normalizer->normalize(c);
     if (!n)
         return std::nullopt;
 
-    return normalizer->isInhabited(n);
+    nr = normalizer->isInhabited(n.get());
+
+    switch (nr)
+    {
+    case NormalizationResult::HitLimits:
+        return std::nullopt;
+    case NormalizationResult::False:
+        return false;
+    case NormalizationResult::True:
+        return true;
+    }
+
+    // n.b. msvc can never figure this stuff out.
+    LUAU_UNREACHABLE();
 }
 
 TypeId TypeChecker::checkRelationalOperation(
@@ -4852,12 +4901,27 @@ TypeId TypeChecker::instantiate(const ScopePtr& scope, TypeId ty, Location locat
     if (ftv && ftv->hasNoFreeOrGenericTypes)
         return ty;
 
-    Instantiation instantiation{log, &currentModule->internalTypes, builtinTypes, scope->level, /*scope*/ nullptr};
+    std::optional<TypeId> instantiated;
 
-    if (instantiationChildLimit)
-        instantiation.childLimit = *instantiationChildLimit;
+    if (FFlag::LuauReusableSubstitutions)
+    {
+        reusableInstantiation.resetState(log, &currentModule->internalTypes, builtinTypes, scope->level, /*scope*/ nullptr);
 
-    std::optional<TypeId> instantiated = instantiation.substitute(ty);
+        if (instantiationChildLimit)
+            reusableInstantiation.childLimit = *instantiationChildLimit;
+
+        instantiated = reusableInstantiation.substitute(ty);
+    }
+    else
+    {
+        Instantiation instantiation{log, &currentModule->internalTypes, builtinTypes, scope->level, /*scope*/ nullptr};
+
+        if (instantiationChildLimit)
+            instantiation.childLimit = *instantiationChildLimit;
+
+        instantiated = instantiation.substitute(ty);
+    }
+
     if (instantiated.has_value())
         return *instantiated;
     else
@@ -5606,7 +5670,8 @@ TypeId TypeChecker::instantiateTypeFun(const ScopePtr& scope, const TypeFun& tf,
     TypeId instantiated = *maybeInstantiated;
 
     TypeId target = follow(instantiated);
-    bool needsClone = follow(tf.type) == target;
+    const TableType* tfTable = getTableType(tf.type);
+    bool needsClone = follow(tf.type) == target || (tfTable != nullptr && tfTable == getTableType(target));
     bool shouldMutate = getTableType(tf.type);
     TableType* ttv = getMutableTableType(target);
 

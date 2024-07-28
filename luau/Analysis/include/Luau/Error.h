@@ -334,18 +334,25 @@ struct DynamicPropertyLookupOnClassesUnsafe
     bool operator==(const DynamicPropertyLookupOnClassesUnsafe& rhs) const;
 };
 
-struct UninhabitedTypeFamily
+struct UninhabitedTypeFunction
 {
     TypeId ty;
 
-    bool operator==(const UninhabitedTypeFamily& rhs) const;
+    bool operator==(const UninhabitedTypeFunction& rhs) const;
 };
 
-struct UninhabitedTypePackFamily
+struct ExplicitFunctionAnnotationRecommended
+{
+    std::vector<std::pair<std::string, TypeId>> recommendedArgs;
+    TypeId recommendedReturn;
+    bool operator==(const ExplicitFunctionAnnotationRecommended& rhs) const;
+};
+
+struct UninhabitedTypePackFunction
 {
     TypePackId tp;
 
-    bool operator==(const UninhabitedTypePackFamily& rhs) const;
+    bool operator==(const UninhabitedTypePackFunction& rhs) const;
 };
 
 struct WhereClauseNeeded
@@ -380,13 +387,71 @@ struct NonStrictFunctionDefinitionError
     bool operator==(const NonStrictFunctionDefinitionError& rhs) const;
 };
 
-using TypeErrorData = Variant<TypeMismatch, UnknownSymbol, UnknownProperty, NotATable, CannotExtendTable, OnlyTablesCanHaveMethods,
-    DuplicateTypeDefinition, CountMismatch, FunctionDoesNotTakeSelf, FunctionRequiresSelf, OccursCheckFailed, UnknownRequire,
-    IncorrectGenericParameterCount, SyntaxError, CodeTooComplex, UnificationTooComplex, UnknownPropButFoundLikeProp, GenericError, InternalError,
-    CannotCallNonFunction, ExtraInformation, DeprecatedApiUsed, ModuleHasCyclicDependency, IllegalRequire, FunctionExitsWithoutReturning,
-    DuplicateGenericParameter, CannotInferBinaryOperation, MissingProperties, SwappedGenericTypeParameter, OptionalValueAccess, MissingUnionProperty,
-    TypesAreUnrelated, NormalizationTooComplex, TypePackMismatch, DynamicPropertyLookupOnClassesUnsafe, UninhabitedTypeFamily,
-    UninhabitedTypePackFamily, WhereClauseNeeded, PackWhereClauseNeeded, CheckedFunctionCallError, NonStrictFunctionDefinitionError>;
+struct PropertyAccessViolation
+{
+    TypeId table;
+    Name key;
+
+    enum
+    {
+        CannotRead,
+        CannotWrite
+    } context;
+
+    bool operator==(const PropertyAccessViolation& rhs) const;
+};
+
+struct CheckedFunctionIncorrectArgs
+{
+    std::string functionName;
+    size_t expected;
+    size_t actual;
+    bool operator==(const CheckedFunctionIncorrectArgs& rhs) const;
+};
+
+struct CannotAssignToNever
+{
+    // type of the rvalue being assigned
+    TypeId rhsType;
+
+    // Originating type.
+    std::vector<TypeId> cause;
+
+    enum class Reason
+    {
+        // when assigning to a property in a union of tables, the properties type
+        // is narrowed to the intersection of its type in each variant.
+        PropertyNarrowed,
+    };
+
+    Reason reason;
+
+    bool operator==(const CannotAssignToNever& rhs) const;
+};
+
+struct UnexpectedTypeInSubtyping
+{
+    TypeId ty;
+
+    bool operator==(const UnexpectedTypeInSubtyping& rhs) const;
+};
+
+struct UnexpectedTypePackInSubtyping
+{
+    TypePackId tp;
+
+    bool operator==(const UnexpectedTypePackInSubtyping& rhs) const;
+};
+
+using TypeErrorData =
+    Variant<TypeMismatch, UnknownSymbol, UnknownProperty, NotATable, CannotExtendTable, OnlyTablesCanHaveMethods, DuplicateTypeDefinition,
+        CountMismatch, FunctionDoesNotTakeSelf, FunctionRequiresSelf, OccursCheckFailed, UnknownRequire, IncorrectGenericParameterCount, SyntaxError,
+        CodeTooComplex, UnificationTooComplex, UnknownPropButFoundLikeProp, GenericError, InternalError, CannotCallNonFunction, ExtraInformation,
+        DeprecatedApiUsed, ModuleHasCyclicDependency, IllegalRequire, FunctionExitsWithoutReturning, DuplicateGenericParameter, CannotAssignToNever,
+        CannotInferBinaryOperation, MissingProperties, SwappedGenericTypeParameter, OptionalValueAccess, MissingUnionProperty, TypesAreUnrelated,
+        NormalizationTooComplex, TypePackMismatch, DynamicPropertyLookupOnClassesUnsafe, UninhabitedTypeFunction, UninhabitedTypePackFunction,
+        WhereClauseNeeded, PackWhereClauseNeeded, CheckedFunctionCallError, NonStrictFunctionDefinitionError, PropertyAccessViolation,
+        CheckedFunctionIncorrectArgs, UnexpectedTypeInSubtyping, UnexpectedTypePackInSubtyping, ExplicitFunctionAnnotationRecommended>;
 
 struct TypeErrorSummary
 {

@@ -5,6 +5,7 @@
 #include "Luau/Substitution.h"
 #include "Luau/TypeFwd.h"
 #include "Luau/Unifiable.h"
+#include "Luau/VisitType.h"
 
 namespace Luau
 {
@@ -27,12 +28,16 @@ struct ReplaceGenerics : Substitution
     {
     }
 
+    void resetState(const TxnLog* log, TypeArena* arena, NotNull<BuiltinTypes> builtinTypes, TypeLevel level, Scope* scope,
+        const std::vector<TypeId>& generics, const std::vector<TypePackId>& genericPacks);
+
     NotNull<BuiltinTypes> builtinTypes;
 
     TypeLevel level;
     Scope* scope;
     std::vector<TypeId> generics;
     std::vector<TypePackId> genericPacks;
+
     bool ignoreChildren(TypeId ty) override;
     bool isDirty(TypeId ty) override;
     bool isDirty(TypePackId tp) override;
@@ -48,18 +53,77 @@ struct Instantiation : Substitution
         , builtinTypes(builtinTypes)
         , level(level)
         , scope(scope)
+        , reusableReplaceGenerics(log, arena, builtinTypes, level, scope, {}, {})
     {
     }
+
+    void resetState(const TxnLog* log, TypeArena* arena, NotNull<BuiltinTypes> builtinTypes, TypeLevel level, Scope* scope);
 
     NotNull<BuiltinTypes> builtinTypes;
 
     TypeLevel level;
     Scope* scope;
+
+    ReplaceGenerics reusableReplaceGenerics;
+
     bool ignoreChildren(TypeId ty) override;
     bool isDirty(TypeId ty) override;
     bool isDirty(TypePackId tp) override;
     TypeId clean(TypeId ty) override;
     TypePackId clean(TypePackId tp) override;
+};
+
+// Used to find if a FunctionType requires generic type cleanup during instantiation
+struct GenericTypeFinder : TypeOnceVisitor
+{
+    bool found = false;
+
+    bool visit(TypeId ty) override
+    {
+        return !found;
+    }
+
+    bool visit(TypePackId ty) override
+    {
+        return !found;
+    }
+
+    bool visit(TypeId ty, const Luau::FunctionType& ftv) override
+    {
+        if (ftv.hasNoFreeOrGenericTypes)
+            return false;
+
+        if (!ftv.generics.empty() || !ftv.genericPacks.empty())
+            found = true;
+
+        return !found;
+    }
+
+    bool visit(TypeId ty, const Luau::TableType& ttv) override
+    {
+        if (ttv.state == Luau::TableState::Generic)
+            found = true;
+
+        return !found;
+    }
+
+    bool visit(TypeId ty, const Luau::GenericType&) override
+    {
+        found = true;
+        return false;
+    }
+
+    bool visit(TypePackId ty, const Luau::GenericTypePack&) override
+    {
+        found = true;
+        return false;
+    }
+
+    bool visit(TypeId ty, const Luau::ClassType&) override
+    {
+        // During function instantiation, classes are not traversed even if they have generics
+        return false;
+    }
 };
 
 /** Attempt to instantiate a type.  Only used under local type inference.

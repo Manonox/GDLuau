@@ -11,7 +11,7 @@
 #include "Luau/TypeInfer.h"
 #include "Luau/TypePack.h"
 #include "Luau/Type.h"
-#include "Luau/TypeFamily.h"
+#include "Luau/TypeFunction.h"
 #include "Luau/VisitType.h"
 #include "Luau/TypeOrPack.h"
 
@@ -20,8 +20,6 @@
 #include <string>
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
-LUAU_FASTFLAGVARIABLE(LuauToStringPrettifyLocation, false)
-LUAU_FASTFLAGVARIABLE(LuauToStringSimpleCompositeTypesSingleLine, false)
 
 /*
  * Enables increasing levels of verbosity for Luau type names when stringifying.
@@ -98,16 +96,6 @@ struct FindCyclicTypes final : TypeVisitor
             if (ft.upperBound)
                 traverse(ft.upperBound);
         }
-
-        return false;
-    }
-
-    bool visit(TypeId ty, const LocalType& lt) override
-    {
-        if (!visited.insert(ty))
-            return false;
-
-        traverse(lt.domain);
 
         return false;
     }
@@ -374,7 +362,7 @@ struct TypeStringifier
             tv->ty);
     }
 
-    void stringify(const std::string& name, const Property& prop)
+    void emitKey(const std::string& name)
     {
         if (isIdentifier(name))
             state.emit(name);
@@ -385,31 +373,46 @@ struct TypeStringifier
             state.emit("\"]");
         }
         state.emit(": ");
+    }
 
-        if (FFlag::DebugLuauReadWriteProperties)
+    void _newStringify(const std::string& name, const Property& prop)
+    {
+        bool comma = false;
+        if (prop.isShared())
         {
-            // We special case the stringification if the property's read and write types are shared.
-            if (prop.isShared())
-                return stringify(*prop.readType());
-
-            // Otherwise emit them separately.
-            if (auto ty = prop.readType())
-            {
-                state.emit("read ");
-                stringify(*ty);
-            }
-
-            if (prop.readType() && prop.writeType())
-                state.emit(" + ");
-
-            if (auto ty = prop.writeType())
-            {
-                state.emit("write ");
-                stringify(*ty);
-            }
-        }
-        else
+            emitKey(name);
             stringify(prop.type());
+            return;
+        }
+
+        if (prop.readTy)
+        {
+            state.emit("read ");
+            emitKey(name);
+            stringify(*prop.readTy);
+            comma = true;
+        }
+        if (prop.writeTy)
+        {
+            if (comma)
+            {
+                state.emit(",");
+                state.newline();
+            }
+
+            state.emit("write ");
+            emitKey(name);
+            stringify(*prop.writeTy);
+        }
+    }
+
+    void stringify(const std::string& name, const Property& prop)
+    {
+        if (FFlag::DebugLuauDeferredConstraintResolution)
+            return _newStringify(name, prop);
+
+        emitKey(name);
+        stringify(prop.type());
     }
 
     void stringify(TypePackId tp);
@@ -510,21 +513,6 @@ struct TypeStringifier
             else
                 state.emit(ftv.level);
         }
-    }
-
-    void operator()(TypeId ty, const LocalType& lt)
-    {
-        state.emit("l-");
-        state.emit(lt.name);
-        if (FInt::DebugLuauVerboseTypeNames >= 1)
-        {
-            state.emit("[");
-            state.emit(lt.blockCount);
-            state.emit("]");
-        }
-        state.emit("=[");
-        stringify(lt.domain);
-        state.emit("]");
     }
 
     void operator()(TypeId, const BoundType& btv)
@@ -1043,9 +1031,9 @@ struct TypeStringifier
             state.emit(")");
     }
 
-    void operator()(TypeId, const TypeFamilyInstanceType& tfitv)
+    void operator()(TypeId, const TypeFunctionInstanceType& tfitv)
     {
-        state.emit(tfitv.family->name);
+        state.emit(tfitv.function->name);
         state.emit("<");
 
         bool comma = false;
@@ -1244,9 +1232,9 @@ struct TypePackStringifier
         state.emit("*");
     }
 
-    void operator()(TypePackId, const TypeFamilyInstanceTypePack& tfitp)
+    void operator()(TypePackId, const TypeFunctionInstanceTypePack& tfitp)
     {
-        state.emit(tfitp.family->name);
+        state.emit(tfitp.function->name);
         state.emit("<");
 
         bool comma = false;
@@ -1284,8 +1272,8 @@ void TypeStringifier::stringify(TypePackId tpid, const std::vector<std::optional
     tps.stringify(tpid);
 }
 
-static void assignCycleNames(const std::set<TypeId>& cycles, const std::set<TypePackId>& cycleTPs,
-    DenseHashMap<TypeId, std::string>& cycleNames, DenseHashMap<TypePackId, std::string>& cycleTpNames, bool exhaustive)
+static void assignCycleNames(const std::set<TypeId>& cycles, const std::set<TypePackId>& cycleTPs, DenseHashMap<TypeId, std::string>& cycleNames,
+    DenseHashMap<TypePackId, std::string>& cycleTpNames, bool exhaustive)
 {
     int nextIndex = 1;
 
@@ -1477,7 +1465,7 @@ ToStringResult toStringDetailed(TypePackId tp, ToStringOptions& opts)
     else
         tvs.stringify(tp);
 
-    if (!cycles.empty())
+    if (!cycles.empty() || !cycleTPs.empty())
     {
         result.cycle = true;
         state.emit(" where ");
@@ -1503,6 +1491,29 @@ ToStringResult toStringDetailed(TypePackId tp, ToStringOptions& opts)
                 return tvs(cycleTy, t);
             },
             cycleTy->ty);
+
+        semi = true;
+    }
+
+    std::vector<std::pair<TypePackId, std::string>> sortedCycleTpNames{state.cycleTpNames.begin(), state.cycleTpNames.end()};
+    std::sort(sortedCycleTpNames.begin(), sortedCycleTpNames.end(), [](const auto& a, const auto& b) {
+        return a.second < b.second;
+    });
+
+    TypePackStringifier tps{tvs.state};
+
+    for (const auto& [cycleTp, name] : sortedCycleTpNames)
+    {
+        if (semi)
+            state.emit(" ; ");
+
+        state.emit(name);
+        state.emit(" = ");
+        Luau::visit(
+            [&tps, cycleTp = cycleTp](auto t) {
+                return tps(cycleTp, t);
+            },
+            cycleTp->ty);
 
         semi = true;
     }
@@ -1688,6 +1699,18 @@ std::string generateName(size_t i)
     return n;
 }
 
+std::string toStringVector(const std::vector<TypeId>& types, ToStringOptions& opts)
+{
+    std::string s;
+    for (TypeId ty : types)
+    {
+        if (!s.empty())
+            s += ", ";
+        s += toString(ty, opts);
+    }
+    return s;
+}
+
 std::string toString(const Constraint& constraint, ToStringOptions& opts)
 {
     auto go = [&opts](auto&& c) -> std::string {
@@ -1707,7 +1730,7 @@ std::string toString(const Constraint& constraint, ToStringOptions& opts)
         {
             std::string subStr = tos(c.subPack);
             std::string superStr = tos(c.superPack);
-            return subStr + " <: " + superStr;
+            return subStr + " <...: " + superStr;
         }
         else if constexpr (std::is_same_v<T, GeneralizationConstraint>)
         {
@@ -1715,16 +1738,10 @@ std::string toString(const Constraint& constraint, ToStringOptions& opts)
             std::string superStr = tos(c.sourceType);
             return subStr + " ~ gen " + superStr;
         }
-        else if constexpr (std::is_same_v<T, InstantiationConstraint>)
-        {
-            std::string subStr = tos(c.subType);
-            std::string superStr = tos(c.superType);
-            return subStr + " ~ inst " + superStr;
-        }
         else if constexpr (std::is_same_v<T, IterableConstraint>)
         {
             std::string iteratorStr = tos(c.iterator);
-            std::string variableStr = tos(c.variables);
+            std::string variableStr = toStringVector(c.variables, opts);
 
             return variableStr + " ~ iterate " + iteratorStr;
         }
@@ -1742,58 +1759,39 @@ std::string toString(const Constraint& constraint, ToStringOptions& opts)
         {
             return "call " + tos(c.fn) + "( " + tos(c.argsPack) + " )" + " with { result = " + tos(c.result) + " }";
         }
+        else if constexpr (std::is_same_v<T, FunctionCheckConstraint>)
+        {
+            return "function_check " + tos(c.fn) + " " + tos(c.argsPack);
+        }
         else if constexpr (std::is_same_v<T, PrimitiveTypeConstraint>)
         {
-            return tos(c.resultType) + " ~ prim " + tos(c.expectedType) + ", " + tos(c.singletonType) + ", " + tos(c.multitonType);
+            if (c.expectedType)
+                return "prim " + tos(c.freeType) + "[expected: " + tos(*c.expectedType) + "] as " + tos(c.primitiveType);
+            else
+                return "prim " + tos(c.freeType) + " as " + tos(c.primitiveType);
         }
         else if constexpr (std::is_same_v<T, HasPropConstraint>)
         {
-            return tos(c.resultType) + " ~ hasProp " + tos(c.subjectType) + ", \"" + c.prop + "\"";
+            return tos(c.resultType) + " ~ hasProp " + tos(c.subjectType) + ", \"" + c.prop + "\" ctx=" + std::to_string(int(c.context));
         }
-        else if constexpr (std::is_same_v<T, SetPropConstraint>)
+        else if constexpr (std::is_same_v<T, HasIndexerConstraint>)
         {
-            const std::string pathStr = c.path.size() == 1 ? "\"" + c.path[0] + "\"" : "[\"" + join(c.path, "\", \"") + "\"]";
-            return tos(c.resultType) + " ~ setProp " + tos(c.subjectType) + ", " + pathStr + " " + tos(c.propType);
+            return tos(c.resultType) + " ~ hasIndexer " + tos(c.subjectType) + " " + tos(c.indexType);
         }
-        else if constexpr (std::is_same_v<T, SetIndexerConstraint>)
-        {
-            return tos(c.resultType) + " ~ setIndexer " + tos(c.subjectType) + " [ " + tos(c.indexType) + " ] " + tos(c.propType);
-        }
-        else if constexpr (std::is_same_v<T, SingletonOrTopTypeConstraint>)
-        {
-            std::string result = tos(c.resultType);
-            std::string discriminant = tos(c.discriminantType);
-
-            if (c.negated)
-                return result + " ~ if isSingleton D then ~D else unknown where D = " + discriminant;
-            else
-                return result + " ~ if isSingleton D then D else unknown where D = " + discriminant;
-        }
+        else if constexpr (std::is_same_v<T, AssignPropConstraint>)
+            return "assignProp " + tos(c.lhsType) + " " + c.propName + " " + tos(c.rhsType);
+        else if constexpr (std::is_same_v<T, AssignIndexConstraint>)
+            return "assignIndex " + tos(c.lhsType) + " " + tos(c.indexType) + " " + tos(c.rhsType);
         else if constexpr (std::is_same_v<T, UnpackConstraint>)
-            return tos(c.resultPack) + " ~ unpack " + tos(c.sourcePack);
-        else if constexpr (std::is_same_v<T, SetOpConstraint>)
-        {
-            const char* op = c.mode == SetOpConstraint::Union ? " | " : " & ";
-            std::string res = tos(c.resultType) + " ~ ";
-            bool first = true;
-            for (TypeId t : c.types)
-            {
-                if (first)
-                    first = false;
-                else
-                    res += op;
-
-                res += tos(t);
-            }
-
-            return res;
-        }
+            return toStringVector(c.resultPack, opts) + " ~ ...unpack " + tos(c.sourcePack);
         else if constexpr (std::is_same_v<T, ReduceConstraint>)
             return "reduce " + tos(c.ty);
         else if constexpr (std::is_same_v<T, ReducePackConstraint>)
         {
             return "reduce " + tos(c.tp);
         }
+        else if constexpr (std::is_same_v<T, EqualityConstraint>)
+            return "equality: " + tos(c.resultType) + " ~ " + tos(c.assignmentType);
         else
             static_assert(always_false_v<T>, "Non-exhaustive constraint switch");
     };
@@ -1855,15 +1853,8 @@ std::string toString(const Position& position)
 
 std::string toString(const Location& location, int offset, bool useBegin)
 {
-    if (FFlag::LuauToStringPrettifyLocation)
-    {
-        return "(" + std::to_string(location.begin.line + offset) + ", " + std::to_string(location.begin.column + offset) + ") - (" +
-               std::to_string(location.end.line + offset) + ", " + std::to_string(location.end.column + offset) + ")";
-    }
-    else
-    {
-        return "Location { " + toString(location.begin) + ", " + toString(location.end) + " }";
-    }
+    return "(" + std::to_string(location.begin.line + offset) + ", " + std::to_string(location.begin.column + offset) + ") - (" +
+           std::to_string(location.end.line + offset) + ", " + std::to_string(location.end.column + offset) + ")";
 }
 
 std::string toString(const TypeOrPack& tyOrTp, ToStringOptions& opts)

@@ -44,6 +44,20 @@ TEST_CASE_FIXTURE(Fixture, "string_singletons")
     LUAU_REQUIRE_NO_ERRORS(result);
 }
 
+TEST_CASE_FIXTURE(Fixture, "string_singleton_function_call")
+{
+    if (!FFlag::DebugLuauDeferredConstraintResolution)
+        return;
+
+    CheckResult result = check(R"(
+        local x = "a"
+        function f(x: "a") end
+        f(x)
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
 TEST_CASE_FIXTURE(Fixture, "bool_singletons_mismatch")
 {
     CheckResult result = check(R"(
@@ -228,11 +242,23 @@ TEST_CASE_FIXTURE(Fixture, "tagged_unions_immutable_tag")
         type Dog = { tag: "Dog", howls: boolean }
         type Cat = { tag: "Cat", meows: boolean }
         type Animal = Dog | Cat
-        local a : Animal = { tag = "Cat", meows = true }
+        local a: Animal = { tag = "Cat", meows = true }
         a.tag = "Dog"
     )");
 
     LUAU_REQUIRE_ERRORS(result);
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+    {
+        CannotAssignToNever* tm = get<CannotAssignToNever>(result.errors[0]);
+        REQUIRE(tm);
+
+        CHECK(builtinTypes->stringType == tm->rhsType);
+        CHECK(CannotAssignToNever::Reason::PropertyNarrowed == tm->reason);
+        REQUIRE(tm->cause.size() == 2);
+        CHECK("\"Dog\"" == toString(tm->cause[0]));
+        CHECK("\"Cat\"" == toString(tm->cause[1]));
+    }
 }
 
 TEST_CASE_FIXTURE(Fixture, "table_has_a_boolean")
@@ -360,14 +386,15 @@ TEST_CASE_FIXTURE(Fixture, "parametric_tagged_union_alias")
         type Result<O, E> = Ok<O> | Err<E>
 
         local a : Result<string, number> = {success = false, result = "hotdogs"}
-        local b : Result<string, number> = {success = true, result = "hotdogs"}
+        -- local b : Result<string, number> = {success = true, result = "hotdogs"}
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
-    // FIXME: This could be improved by expanding the contents of `a`
-    const std::string expectedError =
-        "Type 'a' could not be converted into 'Err<number> | Ok<string>'";
+    const std::string expectedError = R"(Type
+    '{ result: string, success: boolean }'
+could not be converted into
+    'Err<number> | Ok<string>')";
 
     CHECK(toString(result.errors[0]) == expectedError);
 }
@@ -538,6 +565,26 @@ TEST_CASE_FIXTURE(Fixture, "no_widening_from_callsites")
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "singletons_stick_around_under_assignment")
+{
+    CheckResult result = check(R"(
+        type Foo = {
+            kind: "Foo",
+        }
+
+        local foo = (nil :: any) :: Foo
+
+        print(foo.kind == "Bar") -- type of equality refines to `false`
+        local kind = foo.kind
+        print(kind == "Bar") -- type of equality refines to `false`
+    )");
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        LUAU_REQUIRE_NO_ERRORS(result);
+    else
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
 }
 
 TEST_SUITE_END();

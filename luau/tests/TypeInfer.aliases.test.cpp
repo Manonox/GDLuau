@@ -4,12 +4,12 @@
 
 #include "doctest.h"
 #include "Luau/BuiltinDefinitions.h"
+#include "Luau/AstQuery.h"
 
 using namespace Luau;
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution)
 LUAU_FASTFLAG(DebugLuauSharedSelf);
-LUAU_FASTFLAG(LuauForbidAliasNamedTypeof);
 
 TEST_SUITE_BEGIN("TypeAliases");
 
@@ -202,7 +202,7 @@ TEST_CASE_FIXTURE(Fixture, "generic_aliases")
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-    const std::string expected = R"(Type 'bad' could not be converted into 'T<number>'; at ["v"], string is not exactly number)";
+    const std::string expected = R"(Type '{ v: string }' could not be converted into 'T<number>'; at [read "v"], string is not exactly number)";
     CHECK(result.errors[0].location == Location{{4, 31}, {4, 44}});
     CHECK_EQ(expected, toString(result.errors[0]));
 }
@@ -221,7 +221,8 @@ TEST_CASE_FIXTURE(Fixture, "dependent_generic_aliases")
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-    const std::string expected = R"(Type 'bad' could not be converted into 'U<number>'; at ["t"]["v"], string is not exactly number)";
+    const std::string expected =
+        R"(Type '{ t: { v: string } }' could not be converted into 'U<number>'; at [read "t"][read "v"], string is not exactly number)";
 
     CHECK(result.errors[0].location == Location{{4, 31}, {4, 52}});
     CHECK_EQ(expected, toString(result.errors[0]));
@@ -929,17 +930,19 @@ TEST_CASE_FIXTURE(Fixture, "type_alias_locations")
     )");
 
     ModulePtr mod = getMainModule();
-    REQUIRE(mod);
-    REQUIRE(mod->scopes.size() == 8);
+    REQUIRE(!mod->scopes.empty());
 
     REQUIRE(mod->scopes[0].second->typeAliasNameLocations.count("T") > 0);
     CHECK(mod->scopes[0].second->typeAliasNameLocations["T"] == Location(Position(1, 13), 1));
 
-    REQUIRE(mod->scopes[3].second->typeAliasNameLocations.count("T") > 0);
-    CHECK(mod->scopes[3].second->typeAliasNameLocations["T"] == Location(Position(4, 17), 1));
+    ScopePtr doScope = findScopeAtPosition(*mod, Position{4, 0});
+    REQUIRE(doScope);
 
-    REQUIRE(mod->scopes[3].second->typeAliasNameLocations.count("X") > 0);
-    CHECK(mod->scopes[3].second->typeAliasNameLocations["X"] == Location(Position(5, 17), 1));
+    REQUIRE(doScope->typeAliasNameLocations.count("T") > 0);
+    CHECK(doScope->typeAliasNameLocations["T"] == Location(Position(4, 17), 1));
+
+    REQUIRE(doScope->typeAliasNameLocations.count("X") > 0);
+    CHECK(doScope->typeAliasNameLocations["X"] == Location(Position(5, 17), 1));
 }
 
 /*
@@ -1064,8 +1067,6 @@ TEST_CASE_FIXTURE(Fixture, "table_types_record_the_property_locations")
 
 TEST_CASE_FIXTURE(Fixture, "typeof_is_not_a_valid_alias_name")
 {
-    ScopedFastFlag sff{FFlag::LuauForbidAliasNamedTypeof, true};
-
     CheckResult result = check(R"(
         type typeof = number
     )");
@@ -1073,6 +1074,66 @@ TEST_CASE_FIXTURE(Fixture, "typeof_is_not_a_valid_alias_name")
     LUAU_REQUIRE_ERROR_COUNT(1, result);
 
     CHECK("Type aliases cannot be named typeof" == toString(result.errors[0]));
+}
+
+TEST_CASE_FIXTURE(Fixture, "fuzzer_bug_doesnt_crash")
+{
+    CheckResult result = check(R"(
+type t0 = (t0<t0...>)
+)");
+    LUAU_REQUIRE_ERRORS(result);
+}
+
+
+TEST_CASE_FIXTURE(Fixture, "recursive_type_alias_warns")
+{
+    CheckResult result = check(R"(
+type Foo<T> = Foo<T>
+)");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    auto occursCheckError = get<OccursCheckFailed>(result.errors[0]);
+    REQUIRE(occursCheckError);
+}
+
+TEST_CASE_FIXTURE(Fixture, "recursive_type_alias_bad_pack_use_warns")
+{
+    if (!FFlag::DebugLuauDeferredConstraintResolution)
+        return;
+
+    CheckResult result = check(R"(
+type Foo<T> = Foo<T...>
+)");
+
+    LUAU_REQUIRE_ERROR_COUNT(4, result);
+    auto occursCheckFailed = get<OccursCheckFailed>(result.errors[1]);
+    REQUIRE(occursCheckFailed);
+
+    auto swappedGeneric = get<SwappedGenericTypeParameter>(result.errors[2]);
+    REQUIRE(swappedGeneric);
+    CHECK(swappedGeneric->name == "T");
+}
+
+TEST_CASE_FIXTURE(Fixture, "corecursive_aliases")
+{
+    CheckResult result = check(R"(
+type Foo<T> = Bar<T>
+type Bar<T> = Foo<T>
+)");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    auto err = get<OccursCheckFailed>(result.errors[0]);
+    REQUIRE(err);
+}
+
+TEST_CASE_FIXTURE(Fixture, "should_also_occurs_check")
+{
+    CheckResult result = check(R"(
+type Foo<T> = Foo<T> | string
+)");
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    auto err = get<OccursCheckFailed>(result.errors[0]);
+    REQUIRE(err);
 }
 
 TEST_SUITE_END();

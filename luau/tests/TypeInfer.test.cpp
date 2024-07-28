@@ -9,6 +9,7 @@
 #include "Luau/VisitType.h"
 
 #include "Fixture.h"
+#include "ClassFixture.h"
 #include "ScopedFlags.h"
 
 #include "doctest.h"
@@ -18,7 +19,6 @@
 LUAU_FASTFLAG(LuauFixLocationSpanTableIndexExpr);
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
 LUAU_FASTFLAG(LuauInstantiateInSubtyping);
-LUAU_FASTFLAG(LuauTransitiveSubtyping);
 LUAU_FASTINT(LuauCheckRecursionLimit);
 LUAU_FASTINT(LuauNormalizeCacheLimit);
 LUAU_FASTINT(LuauRecursionLimit);
@@ -58,8 +58,8 @@ TEST_CASE_FIXTURE(Fixture, "tc_error")
     {
         LUAU_REQUIRE_ERROR_COUNT(1, result);
 
-        CHECK_EQ(
-            result.errors[0], (TypeError{Location{Position{0, 35}, Position{0, 36}}, TypeMismatch{builtinTypes->numberType, builtinTypes->stringType}}));
+        CHECK_EQ(result.errors[0],
+            (TypeError{Location{Position{0, 35}, Position{0, 36}}, TypeMismatch{builtinTypes->numberType, builtinTypes->stringType}}));
     }
 }
 
@@ -77,9 +77,9 @@ TEST_CASE_FIXTURE(Fixture, "tc_error_2")
         LUAU_REQUIRE_ERROR_COUNT(1, result);
 
         CHECK_EQ(result.errors[0], (TypeError{Location{Position{0, 18}, Position{0, 22}}, TypeMismatch{
-                                                                                            requireType("a"),
-                                                                                            builtinTypes->stringType,
-                                                                                        }}));
+                                                                                              requireType("a"),
+                                                                                              builtinTypes->stringType,
+                                                                                          }}));
     }
 }
 
@@ -782,7 +782,10 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "no_heap_use_after_free_error")
         end
     )");
 
-    LUAU_REQUIRE_ERRORS(result);
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        LUAU_REQUIRE_NO_ERRORS(result);
+    else
+        LUAU_REQUIRE_ERRORS(result);
 }
 
 TEST_CASE_FIXTURE(Fixture, "infer_type_assertion_value_type")
@@ -976,6 +979,41 @@ TEST_CASE_FIXTURE(Fixture, "fuzzer_found_this")
             function():(typeof(p),typeof(_))
             end
         )[nil]
+    )");
+}
+
+/*
+ * We had a bug where we'd improperly cache the normalization of types that are
+ * not fully solved yet.  This eventually caused a crash elsewhere in the type
+ * solver.
+ */
+TEST_CASE_FIXTURE(BuiltinsFixture, "fuzzer_found_this_2")
+{
+    (void)check(R"(
+        local _
+        if _ then
+            _ = _
+            while _() do
+                _ = # _
+            end
+        end
+    )");
+}
+
+TEST_CASE_FIXTURE(Fixture, "indexing_a_cyclic_intersection_does_not_crash")
+{
+    (void)check(R"(
+        local _
+        if _ then
+            while nil do
+                _ = _
+            end
+        end
+        if _[if _ then ""] then
+            while nil do
+                _ = if _ then ""
+            end
+        end
     )");
 }
 
@@ -1197,28 +1235,6 @@ TEST_CASE_FIXTURE(Fixture, "bidirectional_checking_of_higher_order_function")
     CHECK(location.end.line == 4);
 }
 
-TEST_CASE_FIXTURE(Fixture, "bidirectional_checking_of_callback_property")
-{
-    CheckResult result = check(R"(
-        local print: (number) -> ()
-
-        type Point = {x: number, y: number}
-        local T : {callback: ((Point) -> ())?} = {}
-
-        T.callback = function(p) -- No error here
-            print(p.z)           -- error here.  Point has no property z
-        end
-    )");
-
-    LUAU_REQUIRE_ERROR_COUNT(1, result);
-
-    CHECK_MESSAGE(get<UnknownProperty>(result.errors[0]), "Expected UnknownProperty but got " << result.errors[0]);
-
-    Location location = result.errors[0].location;
-    CHECK(location.begin.line == 7);
-    CHECK(location.end.line == 7);
-}
-
 TEST_CASE_FIXTURE(BuiltinsFixture, "it_is_ok_to_have_inconsistent_number_of_return_values_in_nonstrict")
 {
     CheckResult result = check(R"(
@@ -1293,9 +1309,6 @@ TEST_CASE_FIXTURE(Fixture, "dcr_delays_expansion_of_function_containing_blocked_
 {
     ScopedFastFlag sff[] = {
         {FFlag::DebugLuauDeferredConstraintResolution, true},
-        // If we run this with error-suppression, it triggers an assertion.
-        // FATAL ERROR: Assertion failed: !"Internal error: Trying to normalize a BlockedType"
-        {FFlag::LuauTransitiveSubtyping, false},
     };
 
     CheckResult result = check(R"(
@@ -1506,6 +1519,110 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "be_sure_to_use_active_txnlog_when_evaluating
 
     for (const auto& e : result.errors)
         CHECK(5 == e.location.begin.line);
+}
+
+/*
+ * We had an issue where this kind of typeof() call could produce the untestable type ~{}
+ */
+TEST_CASE_FIXTURE(Fixture, "typeof_cannot_refine_builtin_alias")
+{
+    GlobalTypes& globals = frontend.globals;
+    TypeArena& arena = globals.globalTypes;
+
+    unfreeze(arena);
+
+    globals.globalScope->exportedTypeBindings["GlobalTable"] = TypeFun{{}, arena.addType(TableType{TableState::Sealed, TypeLevel{}})};
+
+    freeze(arena);
+
+    (void)check(R"(
+        function foo(x)
+            if typeof(x) == 'GlobalTable' then
+            end
+        end
+    )");
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "bad_iter_metamethod")
+{
+    CheckResult result = check(R"(
+        function iter(): unknown
+            return nil
+        end
+
+        local a = {__iter = iter}
+        setmetatable(a, a)
+
+        for i in a do
+        end
+    )");
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+    {
+        LUAU_REQUIRE_ERROR_COUNT(1, result);
+
+        CannotCallNonFunction* ccnf = get<CannotCallNonFunction>(result.errors[0]);
+        REQUIRE(ccnf);
+
+        CHECK("unknown" == toString(ccnf->ty));
+    }
+    else
+    {
+        LUAU_REQUIRE_NO_ERRORS(result);
+    }
+}
+
+TEST_CASE_FIXTURE(Fixture, "leading_bar")
+{
+    CheckResult result = check(R"(
+        type Bar = | number
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    CHECK("number" == toString(requireTypeAlias("Bar")));
+}
+
+TEST_CASE_FIXTURE(Fixture, "leading_bar_question_mark")
+{
+    CheckResult result = check(R"(
+        type Bar = |?
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK("Expected type, got '?'" == toString(result.errors[0]));
+    CHECK("*error-type*?" == toString(requireTypeAlias("Bar")));
+}
+
+TEST_CASE_FIXTURE(Fixture, "leading_ampersand")
+{
+    CheckResult result = check(R"(
+        type Amp = & string
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    CHECK("string" == toString(requireTypeAlias("Amp")));
+}
+
+TEST_CASE_FIXTURE(Fixture, "leading_bar_no_type")
+{
+    CheckResult result = check(R"(
+        type Bar = |
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK("Expected type, got <eof>" == toString(result.errors[0]));
+    CHECK("*error-type*" == toString(requireTypeAlias("Bar")));
+}
+
+TEST_CASE_FIXTURE(Fixture, "leading_ampersand_no_type")
+{
+    CheckResult result = check(R"(
+        type Amp = &
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+    CHECK("Expected type, got <eof>" == toString(result.errors[0]));
+    CHECK("*error-type*" == toString(requireTypeAlias("Amp")));
 }
 
 TEST_SUITE_END();

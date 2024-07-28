@@ -7,6 +7,7 @@
 #include "Fixture.h"
 #include "ClassFixture.h"
 
+#include "ScopedFlags.h"
 #include "doctest.h"
 
 using namespace Luau;
@@ -16,6 +17,39 @@ LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
 LUAU_FASTFLAG(LuauAlwaysCommitInferencesOfFunctionCalls);
 
 TEST_SUITE_BEGIN("TypeInferClasses");
+
+TEST_CASE_FIXTURE(ClassFixture, "Luau.Analyze.CLI_crashes_on_this_test")
+{
+    CheckResult result = check(R"(
+        local CircularQueue = {}
+CircularQueue.__index = CircularQueue
+
+function CircularQueue:new()
+	local newCircularQueue = {
+		head = nil,
+	}
+	setmetatable(newCircularQueue, CircularQueue)
+
+	return newCircularQueue
+end
+
+function CircularQueue:push()
+	local newListNode
+
+	if self.head then
+		newListNode = {
+			prevNode = self.head.prevNode,
+			nextNode = self.head,
+		}
+		newListNode.prevNode.nextNode = newListNode
+		newListNode.nextNode.prevNode = newListNode
+	end
+end
+
+return CircularQueue
+
+    )");
+}
 
 TEST_CASE_FIXTURE(ClassFixture, "call_method_of_a_class")
 {
@@ -463,7 +497,7 @@ local b: B = a
     LUAU_REQUIRE_ERRORS(result);
 
     if (FFlag::DebugLuauDeferredConstraintResolution)
-        CHECK(toString(result.errors.at(0)) == "Type 'a' could not be converted into 'B'; at [\"x\"], ChildClass is not exactly BaseClass");
+        CHECK(toString(result.errors.at(0)) == "Type 'A' could not be converted into 'B'; at [read \"x\"], ChildClass is not exactly BaseClass");
     else
     {
         const std::string expected = R"(Type 'A' could not be converted into 'B'
@@ -472,6 +506,31 @@ caused by:
 Type 'ChildClass' could not be converted into 'BaseClass' in an invariant context)";
         CHECK_EQ(expected, toString(result.errors.at(0)));
     }
+}
+
+TEST_CASE_FIXTURE(ClassFixture, "optional_class_casts_work_in_new_solver")
+{
+    ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, true};
+
+    CheckResult result = check(R"(
+        type A = { x: ChildClass }
+        type B = { x: BaseClass }
+
+        local a = { x = ChildClass.New() } :: A
+        local opt_a = a :: A?
+        local b = { x = BaseClass.New() } :: B
+        local opt_b = b :: B?
+        local b_from_a = a :: B
+        local b_from_opt_a = opt_a :: B
+        local opt_b_from_a = a :: B?
+        local opt_b_from_opt_a = opt_a :: B?
+        local a_from_b = b :: A
+        local a_from_opt_b = opt_b :: A
+        local opt_a_from_b = b :: A?
+        local opt_a_from_opt_b = opt_b :: A?
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
 }
 
 TEST_CASE_FIXTURE(ClassFixture, "callable_classes")
@@ -637,6 +696,123 @@ TEST_CASE_FIXTURE(ClassFixture, "indexable_classes")
         )");
         CHECK_EQ(toString(result.errors.at(0)), "Type 'string' could not be converted into 'number'");
     }
+}
+
+TEST_CASE_FIXTURE(Fixture, "read_write_class_properties")
+{
+    ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, true};
+
+    TypeArena& arena = frontend.globals.globalTypes;
+
+    unfreeze(arena);
+
+    TypeId instanceType = arena.addType(ClassType{"Instance", {}, nullopt, nullopt, {}, {}, "Test", {}});
+    getMutable<ClassType>(instanceType)->props = {{"Parent", Property::rw(instanceType)}};
+
+    //
+
+    TypeId workspaceType = arena.addType(ClassType{"Workspace", {}, nullopt, nullopt, {}, {}, "Test", {}});
+
+    TypeId scriptType =
+        arena.addType(ClassType{"Script", {{"Parent", Property::rw(workspaceType, instanceType)}}, instanceType, nullopt, {}, {}, "Test", {}});
+
+    TypeId partType = arena.addType(
+        ClassType{"Part", {{"BrickColor", Property::rw(builtinTypes->stringType)}, {"Parent", Property::rw(workspaceType, instanceType)}},
+            instanceType, nullopt, {}, {}, "Test", {}});
+
+    getMutable<ClassType>(workspaceType)->props = {{"Script", Property::readonly(scriptType)}, {"Part", Property::readonly(partType)}};
+
+    frontend.globals.globalScope->bindings[frontend.globals.globalNames.names->getOrAdd("script")] = Binding{scriptType};
+
+    freeze(arena);
+
+    CheckResult result = check(R"(
+        script.Parent.Part.BrickColor = 0xFFFFFF
+        script.Parent.Part.Parent = script
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+
+    CHECK(Location{{1, 40}, {1, 48}} == result.errors[0].location);
+    TypeMismatch* tm = get<TypeMismatch>(result.errors[0]);
+    REQUIRE(tm);
+    CHECK(builtinTypes->stringType == tm->wantedType);
+    CHECK(builtinTypes->numberType == tm->givenType);
+}
+
+TEST_CASE_FIXTURE(ClassFixture, "cannot_index_a_class_with_no_indexer")
+{
+    CheckResult result = check(R"(
+        local a = BaseClass.New()
+
+        local c = a[1]
+    )");
+
+    LUAU_REQUIRE_ERROR_COUNT(1, result);
+
+    CHECK_MESSAGE(
+        get<DynamicPropertyLookupOnClassesUnsafe>(result.errors[0]), "Expected DynamicPropertyLookupOnClassesUnsafe but got " << result.errors[0]);
+
+    CHECK(builtinTypes->errorType == requireType("c"));
+}
+
+TEST_CASE_FIXTURE(ClassFixture, "cyclic_tables_are_assumed_to_be_compatible_with_classes")
+{
+    /*
+     * This is technically documenting a case where we are intentionally
+     * unsound.
+     *
+     * Our builtins are essentially defined like so:
+     *
+     * declare class BaseClass
+     *     BaseField: number
+     *     function BaseMethod(self, number): ()
+     *     read Touched: Connection
+     * end
+     *
+     * declare class Connection
+     *     Connect: (Connection, (BaseClass) -> ()) -> ()
+     * end
+     *
+     * The type we infer for `onTouch` is
+     *
+     * (t1) -> () where t1 = { read BaseField: unknown, read BaseMethod: (t1, number) -> () }
+     *
+     * In order to validate that onTouch can be passed to Connect, we must
+     * verify the following relation:
+     *
+     * BaseClass <: t1 where t1 = { read BaseField: unknown, read BaseMethod: (t1, number) -> () }
+     *
+     * However, the cycle between the table and the function gums up the works
+     * here and the worst thing is that it's perfectly reasonable in principle.
+     * Just from these types, we cannot see that BaseMethod will only be passed
+     * t1.  Without that guarantee, BaseClass cannot be used as a subtype of t1.
+     *
+     * I think the theoretically-correct way to untangle this would be to infer
+     * t1 as a bounded existential type.
+     *
+     * For now, we have a subtyping has a rule that provisionally substitutes
+     * the table for the class type when performing the subtyping test.  We
+     * essentially assume that, for all cyclic functions, that the table and the
+     * class are mutually subtypes of one another.
+     *
+     * For more information, read uses of Subtyping::substitutions.
+     */
+
+    CheckResult result = check(R"(
+        local c = BaseClass.New()
+
+        function requiresNothing() end
+
+        function onTouch(other)
+            requiresNothing(other:BaseMethod(0))
+            print(other.BaseField)
+        end
+
+        c.Touched:Connect(onTouch)
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
 }
 
 TEST_SUITE_END();

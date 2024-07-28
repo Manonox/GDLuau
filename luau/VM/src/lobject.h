@@ -5,8 +5,6 @@
 #include "lua.h"
 #include "lcommon.h"
 
-LUAU_FASTFLAG(LuauTaggedLuData)
-
 /*
 ** Union of all collectible objects
 */
@@ -337,6 +335,7 @@ typedef struct Proto
     int linegaplog2;
     int linedefined;
     int bytecodeid;
+    int sizetypeinfo;
 } Proto;
 // clang-format on
 

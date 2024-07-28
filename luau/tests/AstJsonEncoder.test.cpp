@@ -9,16 +9,14 @@
 #include <math.h>
 #include <ostream>
 
-using namespace Luau;
+LUAU_FASTFLAG(LuauDeclarationExtraPropData)
 
-LUAU_FASTFLAG(LuauClipExtraHasEndProps);
+using namespace Luau;
 
 struct JsonEncoderFixture
 {
     Allocator allocator;
     AstNameTable names{allocator};
-
-    ScopedFastFlag sff{FFlag::LuauClipExtraHasEndProps, true};
 
     ParseResult parse(std::string_view src)
     {
@@ -95,8 +93,6 @@ TEST_CASE("basic_escaping")
 
 TEST_CASE("encode_AstStatBlock")
 {
-    ScopedFastFlag sff{FFlag::LuauClipExtraHasEndProps, true};
-
     AstLocal astlocal{AstName{"a_local"}, Location(), nullptr, 0, 0, nullptr};
     AstLocal* astlocalarray[] = {&astlocal};
 
@@ -414,16 +410,32 @@ TEST_CASE_FIXTURE(JsonEncoderFixture, "encode_AstStatTypeAlias")
 
 TEST_CASE_FIXTURE(JsonEncoderFixture, "encode_AstStatDeclareFunction")
 {
+    ScopedFastFlag luauDeclarationExtraPropData{FFlag::LuauDeclarationExtraPropData, true};
+
     AstStat* statement = expectParseStatement("declare function foo(x: number): string");
 
     std::string_view expected =
-        R"({"type":"AstStatDeclareFunction","location":"0,0 - 0,39","name":"foo","params":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"0,24 - 0,30","name":"number","nameLocation":"0,24 - 0,30","parameters":[]}]},"retTypes":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"0,33 - 0,39","name":"string","nameLocation":"0,33 - 0,39","parameters":[]}]},"generics":[],"genericPacks":[]})";
+        R"({"type":"AstStatDeclareFunction","location":"0,0 - 0,39","name":"foo","nameLocation":"0,17 - 0,20","params":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"0,24 - 0,30","name":"number","nameLocation":"0,24 - 0,30","parameters":[]}]},"paramNames":[{"type":"AstArgumentName","name":"x","location":"0,21 - 0,22"}],"vararg":false,"varargLocation":"0,0 - 0,0","retTypes":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"0,33 - 0,39","name":"string","nameLocation":"0,33 - 0,39","parameters":[]}]},"generics":[],"genericPacks":[]})";
+
+    CHECK(toJson(statement) == expected);
+}
+
+TEST_CASE_FIXTURE(JsonEncoderFixture, "encode_AstStatDeclareFunction2")
+{
+    ScopedFastFlag luauDeclarationExtraPropData{FFlag::LuauDeclarationExtraPropData, true};
+
+    AstStat* statement = expectParseStatement("declare function foo(x: number, ...: string): string");
+
+    std::string_view expected =
+        R"({"type":"AstStatDeclareFunction","location":"0,0 - 0,52","name":"foo","nameLocation":"0,17 - 0,20","params":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"0,24 - 0,30","name":"number","nameLocation":"0,24 - 0,30","parameters":[]}],"tailType":{"type":"AstTypePackVariadic","location":"0,37 - 0,43","variadicType":{"type":"AstTypeReference","location":"0,37 - 0,43","name":"string","nameLocation":"0,37 - 0,43","parameters":[]}}},"paramNames":[{"type":"AstArgumentName","name":"x","location":"0,21 - 0,22"}],"vararg":true,"varargLocation":"0,32 - 0,35","retTypes":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"0,46 - 0,52","name":"string","nameLocation":"0,46 - 0,52","parameters":[]}]},"generics":[],"genericPacks":[]})";
 
     CHECK(toJson(statement) == expected);
 }
 
 TEST_CASE_FIXTURE(JsonEncoderFixture, "encode_AstStatDeclareClass")
 {
+    ScopedFastFlag luauDeclarationExtraPropData{FFlag::LuauDeclarationExtraPropData, true};
+
     AstStatBlock* root = expectParse(R"(
         declare class Foo
             prop: number
@@ -438,11 +450,11 @@ TEST_CASE_FIXTURE(JsonEncoderFixture, "encode_AstStatDeclareClass")
     REQUIRE(2 == root->body.size);
 
     std::string_view expected1 =
-        R"({"type":"AstStatDeclareClass","location":"1,22 - 4,11","name":"Foo","props":[{"name":"prop","type":"AstDeclaredClassProp","luauType":{"type":"AstTypeReference","location":"2,18 - 2,24","name":"number","nameLocation":"2,18 - 2,24","parameters":[]}},{"name":"method","type":"AstDeclaredClassProp","luauType":{"type":"AstTypeFunction","location":"3,21 - 4,11","generics":[],"genericPacks":[],"argTypes":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"3,39 - 3,45","name":"number","nameLocation":"3,39 - 3,45","parameters":[]}]},"argNames":[{"type":"AstArgumentName","name":"foo","location":"3,34 - 3,37"}],"returnTypes":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"3,48 - 3,54","name":"string","nameLocation":"3,48 - 3,54","parameters":[]}]}}}],"indexer":null})";
+        R"({"type":"AstStatDeclareClass","location":"1,22 - 4,11","name":"Foo","props":[{"name":"prop","nameLocation":"2,12 - 2,16","type":"AstDeclaredClassProp","luauType":{"type":"AstTypeReference","location":"2,18 - 2,24","name":"number","nameLocation":"2,18 - 2,24","parameters":[]},"location":"2,12 - 2,24"},{"name":"method","nameLocation":"3,21 - 3,27","type":"AstDeclaredClassProp","luauType":{"type":"AstTypeFunction","location":"3,12 - 3,54","generics":[],"genericPacks":[],"argTypes":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"3,39 - 3,45","name":"number","nameLocation":"3,39 - 3,45","parameters":[]}]},"argNames":[{"type":"AstArgumentName","name":"foo","location":"3,34 - 3,37"}],"returnTypes":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"3,48 - 3,54","name":"string","nameLocation":"3,48 - 3,54","parameters":[]}]}},"location":"3,12 - 3,54"}],"indexer":null})";
     CHECK(toJson(root->body.data[0]) == expected1);
 
     std::string_view expected2 =
-        R"({"type":"AstStatDeclareClass","location":"6,22 - 8,11","name":"Bar","superName":"Foo","props":[{"name":"prop2","type":"AstDeclaredClassProp","luauType":{"type":"AstTypeReference","location":"7,19 - 7,25","name":"string","nameLocation":"7,19 - 7,25","parameters":[]}}],"indexer":null})";
+        R"({"type":"AstStatDeclareClass","location":"6,22 - 8,11","name":"Bar","superName":"Foo","props":[{"name":"prop2","nameLocation":"7,12 - 7,17","type":"AstDeclaredClassProp","luauType":{"type":"AstTypeReference","location":"7,19 - 7,25","name":"string","nameLocation":"7,19 - 7,25","parameters":[]},"location":"7,12 - 7,25"}],"indexer":null})";
     CHECK(toJson(root->body.data[1]) == expected2);
 }
 
@@ -483,7 +495,7 @@ TEST_CASE_FIXTURE(JsonEncoderFixture, "encode_AstTypeFunction")
     AstStat* statement = expectParseStatement(R"(type fun = (string, bool, named: number) -> ())");
 
     std::string_view expected =
-            R"({"type":"AstStatTypeAlias","location":"0,0 - 0,46","name":"fun","generics":[],"genericPacks":[],"type":{"type":"AstTypeFunction","location":"0,11 - 0,46","generics":[],"genericPacks":[],"argTypes":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"0,12 - 0,18","name":"string","nameLocation":"0,12 - 0,18","parameters":[]},{"type":"AstTypeReference","location":"0,20 - 0,24","name":"bool","nameLocation":"0,20 - 0,24","parameters":[]},{"type":"AstTypeReference","location":"0,33 - 0,39","name":"number","nameLocation":"0,33 - 0,39","parameters":[]}]},"argNames":[null,null,{"type":"AstArgumentName","name":"named","location":"0,26 - 0,31"}],"returnTypes":{"type":"AstTypeList","types":[]}},"exported":false})";
+        R"({"type":"AstStatTypeAlias","location":"0,0 - 0,46","name":"fun","generics":[],"genericPacks":[],"type":{"type":"AstTypeFunction","location":"0,11 - 0,46","generics":[],"genericPacks":[],"argTypes":{"type":"AstTypeList","types":[{"type":"AstTypeReference","location":"0,12 - 0,18","name":"string","nameLocation":"0,12 - 0,18","parameters":[]},{"type":"AstTypeReference","location":"0,20 - 0,24","name":"bool","nameLocation":"0,20 - 0,24","parameters":[]},{"type":"AstTypeReference","location":"0,33 - 0,39","name":"number","nameLocation":"0,33 - 0,39","parameters":[]}]},"argNames":[null,null,{"type":"AstArgumentName","name":"named","location":"0,26 - 0,31"}],"returnTypes":{"type":"AstTypeList","types":[]}},"exported":false})";
 
     CHECK(toJson(statement) == expected);
 }

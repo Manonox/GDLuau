@@ -117,7 +117,17 @@ std::optional<ModuleInfo> TestFileResolver::resolveModule(const ModuleInfo* cont
 
 std::string TestFileResolver::getHumanReadableModuleName(const ModuleName& name) const
 {
-    return name;
+    // We have a handful of tests that need to distinguish between a canonical
+    // ModuleName and the human-readable version so we apply a simple transform
+    // here:  We replace all slashes with dots.
+    std::string result = name;
+    for (size_t i = 0; i < result.size(); ++i)
+    {
+        if (result[i] == '/')
+            result[i] = '.';
+    }
+
+    return result;
 }
 
 std::optional<std::string> TestFileResolver::getEnvironmentForModule(const ModuleName& name) const
@@ -648,7 +658,7 @@ void createSomeClasses(Frontend* frontend)
 
     ScopePtr moduleScope = globals.globalScope;
 
-    TypeId parentType = arena.addType(ClassType{"Parent", {}, frontend->builtinTypes->classType, std::nullopt, {}, nullptr, "Test"});
+    TypeId parentType = arena.addType(ClassType{"Parent", {}, frontend->builtinTypes->classType, std::nullopt, {}, nullptr, "Test", {}});
 
     ClassType* parentClass = getMutable<ClassType>(parentType);
     parentClass->props["method"] = {makeFunction(arena, parentType, {}, {})};
@@ -658,17 +668,17 @@ void createSomeClasses(Frontend* frontend)
     addGlobalBinding(globals, "Parent", {parentType});
     moduleScope->exportedTypeBindings["Parent"] = TypeFun{{}, parentType};
 
-    TypeId childType = arena.addType(ClassType{"Child", {}, parentType, std::nullopt, {}, nullptr, "Test"});
+    TypeId childType = arena.addType(ClassType{"Child", {}, parentType, std::nullopt, {}, nullptr, "Test", {}});
 
     addGlobalBinding(globals, "Child", {childType});
     moduleScope->exportedTypeBindings["Child"] = TypeFun{{}, childType};
 
-    TypeId anotherChildType = arena.addType(ClassType{"AnotherChild", {}, parentType, std::nullopt, {}, nullptr, "Test"});
+    TypeId anotherChildType = arena.addType(ClassType{"AnotherChild", {}, parentType, std::nullopt, {}, nullptr, "Test", {}});
 
     addGlobalBinding(globals, "AnotherChild", {anotherChildType});
     moduleScope->exportedTypeBindings["AnotherChild"] = TypeFun{{}, anotherChildType};
 
-    TypeId unrelatedType = arena.addType(ClassType{"Unrelated", {}, frontend->builtinTypes->classType, std::nullopt, {}, nullptr, "Test"});
+    TypeId unrelatedType = arena.addType(ClassType{"Unrelated", {}, frontend->builtinTypes->classType, std::nullopt, {}, nullptr, "Test", {}});
 
     addGlobalBinding(globals, "Unrelated", {unrelatedType});
     moduleScope->exportedTypeBindings["Unrelated"] = TypeFun{{}, unrelatedType};

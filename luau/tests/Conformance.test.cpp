@@ -16,6 +16,7 @@
 
 #include "doctest.h"
 #include "ScopedFlags.h"
+#include "ConformanceIrHooks.h"
 
 #include <fstream>
 #include <string>
@@ -26,20 +27,33 @@ extern bool verbose;
 extern bool codegen;
 extern int optimizationLevel;
 
-LUAU_FASTFLAG(LuauTaggedLuData);
-LUAU_FASTFLAG(LuauSciNumberSkipTrailDot);
-LUAU_FASTINT(CodegenHeuristicsInstructionLimit);
+// internal functions, declared in lgc.h - not exposed via lua.h
+void luaC_fullgc(lua_State* L);
+void luaC_validate(lua_State* L);
+
+LUAU_FASTFLAG(DebugLuauAbortingChecks)
+LUAU_FASTINT(CodegenHeuristicsInstructionLimit)
+LUAU_FASTFLAG(LuauNativeAttribute)
+LUAU_FASTFLAG(LuauPreserveLudataRenaming)
 
 static lua_CompileOptions defaultOptions()
 {
     lua_CompileOptions copts = {};
     copts.optimizationLevel = optimizationLevel;
     copts.debugLevel = 1;
+    copts.typeInfoLevel = 1;
 
     copts.vectorCtor = "vector";
     copts.vectorType = "vector";
 
     return copts;
+}
+
+static Luau::CodeGen::CompilationOptions defaultCodegenOptions()
+{
+    Luau::CodeGen::CompilationOptions opts = {};
+    opts.flags = Luau::CodeGen::CodeGen_ColdFunctions;
+    return opts;
 }
 
 static int lua_collectgarbage(lua_State* L)
@@ -112,6 +126,15 @@ static int lua_vector_dot(lua_State* L)
     return 1;
 }
 
+static int lua_vector_cross(lua_State* L)
+{
+    const float* a = luaL_checkvector(L, 1);
+    const float* b = luaL_checkvector(L, 2);
+
+    lua_pushvector(L, a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]);
+    return 1;
+}
+
 static int lua_vector_index(lua_State* L)
 {
     const float* v = luaL_checkvector(L, 1);
@@ -120,6 +143,14 @@ static int lua_vector_index(lua_State* L)
     if (strcmp(name, "Magnitude") == 0)
     {
         lua_pushnumber(L, sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
+        return 1;
+    }
+
+    if (strcmp(name, "Unit") == 0)
+    {
+        float invSqrt = 1.0f / sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+
+        lua_pushvector(L, v[0] * invSqrt, v[1] * invSqrt, v[2] * invSqrt);
         return 1;
     }
 
@@ -138,6 +169,9 @@ static int lua_vector_namecall(lua_State* L)
     {
         if (strcmp(str, "Dot") == 0)
             return lua_vector_dot(L);
+
+        if (strcmp(str, "Cross") == 0)
+            return lua_vector_cross(L);
     }
 
     luaL_error(L, "%s is not a valid method of vector", luaL_checkstring(L, 1));
@@ -151,7 +185,8 @@ int lua_silence(lua_State* L)
 using StateRef = std::unique_ptr<lua_State, void (*)(lua_State*)>;
 
 static StateRef runConformance(const char* name, void (*setup)(lua_State* L) = nullptr, void (*yield)(lua_State* L) = nullptr,
-    lua_State* initialLuaState = nullptr, lua_CompileOptions* options = nullptr, bool skipCodegen = false)
+    lua_State* initialLuaState = nullptr, lua_CompileOptions* options = nullptr, bool skipCodegen = false,
+    Luau::CodeGen::CompilationOptions* codegenOptions = nullptr)
 {
 #ifdef LUAU_CONFORMANCE_SOURCE_DIR
     std::string path = LUAU_CONFORMANCE_SOURCE_DIR;
@@ -232,7 +267,11 @@ static StateRef runConformance(const char* name, void (*setup)(lua_State* L) = n
     free(bytecode);
 
     if (result == 0 && codegen && !skipCodegen && luau_codegen_supported())
-        Luau::CodeGen::compile(L, -1, Luau::CodeGen::CodeGen_ColdFunctions);
+    {
+        Luau::CodeGen::CompilationOptions nativeOpts = codegenOptions ? *codegenOptions : defaultCodegenOptions();
+
+        Luau::CodeGen::compile(L, -1, nativeOpts);
+    }
 
     int status = (result == 0) ? lua_resume(L, nullptr, 0) : LUA_ERRSYNTAX;
 
@@ -242,7 +281,6 @@ static StateRef runConformance(const char* name, void (*setup)(lua_State* L) = n
         status = lua_resume(L, nullptr, 0);
     }
 
-    extern void luaC_validate(lua_State * L); // internal function, declared in lgc.h - not exposed via lua.h
     luaC_validate(L);
 
     if (status == 0)
@@ -280,6 +318,248 @@ static void* limitedRealloc(void* ud, void* ptr, size_t osize, size_t nsize)
     }
 }
 
+void setupVectorHelpers(lua_State* L)
+{
+    lua_pushcfunction(L, lua_vector, "vector");
+    lua_setglobal(L, "vector");
+
+#if LUA_VECTOR_SIZE == 4
+    lua_pushvector(L, 0.0f, 0.0f, 0.0f, 0.0f);
+#else
+    lua_pushvector(L, 0.0f, 0.0f, 0.0f);
+#endif
+    luaL_newmetatable(L, "vector");
+
+    lua_pushstring(L, "__index");
+    lua_pushcfunction(L, lua_vector_index, nullptr);
+    lua_settable(L, -3);
+
+    lua_pushstring(L, "__namecall");
+    lua_pushcfunction(L, lua_vector_namecall, nullptr);
+    lua_settable(L, -3);
+
+    lua_setreadonly(L, -1, true);
+    lua_setmetatable(L, -2);
+    lua_pop(L, 1);
+}
+
+Vec2* lua_vec2_push(lua_State* L)
+{
+    Vec2* data = (Vec2*)lua_newuserdatatagged(L, sizeof(Vec2), kTagVec2);
+
+    lua_getuserdatametatable(L, kTagVec2);
+    lua_setmetatable(L, -2);
+
+    return data;
+}
+
+Vec2* lua_vec2_get(lua_State* L, int idx)
+{
+    Vec2* a = (Vec2*)lua_touserdatatagged(L, idx, kTagVec2);
+
+    if (a)
+        return a;
+
+    luaL_typeerror(L, idx, "vec2");
+}
+
+static int lua_vec2(lua_State* L)
+{
+    double x = luaL_checknumber(L, 1);
+    double y = luaL_checknumber(L, 2);
+
+    Vec2* data = lua_vec2_push(L);
+
+    data->x = float(x);
+    data->y = float(y);
+
+    return 1;
+}
+
+static int lua_vec2_dot(lua_State* L)
+{
+    Vec2* a = lua_vec2_get(L, 1);
+    Vec2* b = lua_vec2_get(L, 2);
+
+    lua_pushnumber(L, a->x * b->x + a->y * b->y);
+    return 1;
+}
+
+static int lua_vec2_min(lua_State* L)
+{
+    Vec2* a = lua_vec2_get(L, 1);
+    Vec2* b = lua_vec2_get(L, 2);
+
+    Vec2* data = lua_vec2_push(L);
+
+    data->x = a->x < b->x ? a->x : b->x;
+    data->y = a->y < b->y ? a->y : b->y;
+
+    return 1;
+}
+
+static int lua_vec2_index(lua_State* L)
+{
+    Vec2* v = lua_vec2_get(L, 1);
+    const char* name = luaL_checkstring(L, 2);
+
+    if (strcmp(name, "X") == 0)
+    {
+        lua_pushnumber(L, v->x);
+        return 1;
+    }
+
+    if (strcmp(name, "Y") == 0)
+    {
+        lua_pushnumber(L, v->y);
+        return 1;
+    }
+
+    if (strcmp(name, "Magnitude") == 0)
+    {
+        lua_pushnumber(L, sqrtf(v->x * v->x + v->y * v->y));
+        return 1;
+    }
+
+    if (strcmp(name, "Unit") == 0)
+    {
+        float invSqrt = 1.0f / sqrtf(v->x * v->x + v->y * v->y);
+
+        Vec2* data = lua_vec2_push(L);
+
+        data->x = v->x * invSqrt;
+        data->y = v->y * invSqrt;
+        return 1;
+    }
+
+    luaL_error(L, "%s is not a valid member of vector", name);
+}
+
+static int lua_vec2_namecall(lua_State* L)
+{
+    if (const char* str = lua_namecallatom(L, nullptr))
+    {
+        if (strcmp(str, "Dot") == 0)
+            return lua_vec2_dot(L);
+
+        if (strcmp(str, "Min") == 0)
+            return lua_vec2_min(L);
+    }
+
+    luaL_error(L, "%s is not a valid method of vector", luaL_checkstring(L, 1));
+}
+
+void setupUserdataHelpers(lua_State* L)
+{
+    // create metatable with all the metamethods
+    luaL_newmetatable(L, "vec2");
+    luaL_getmetatable(L, "vec2");
+    lua_pushvalue(L, -1);
+    lua_setuserdatametatable(L, kTagVec2, -1);
+
+    lua_pushcfunction(L, lua_vec2_index, nullptr);
+    lua_setfield(L, -2, "__index");
+
+    lua_pushcfunction(L, lua_vec2_namecall, nullptr);
+    lua_setfield(L, -2, "__namecall");
+
+    lua_pushcclosurek(
+        L,
+        [](lua_State* L) {
+            Vec2* a = lua_vec2_get(L, 1);
+            Vec2* b = lua_vec2_get(L, 2);
+            Vec2* data = lua_vec2_push(L);
+
+            data->x = a->x + b->x;
+            data->y = a->y + b->y;
+
+            return 1;
+        },
+        nullptr, 0, nullptr);
+    lua_setfield(L, -2, "__add");
+
+    lua_pushcclosurek(
+        L,
+        [](lua_State* L) {
+            Vec2* a = lua_vec2_get(L, 1);
+            Vec2* b = lua_vec2_get(L, 2);
+            Vec2* data = lua_vec2_push(L);
+
+            data->x = a->x - b->x;
+            data->y = a->y - b->y;
+
+            return 1;
+        },
+        nullptr, 0, nullptr);
+    lua_setfield(L, -2, "__sub");
+
+    lua_pushcclosurek(
+        L,
+        [](lua_State* L) {
+            Vec2* a = lua_vec2_get(L, 1);
+            Vec2* b = lua_vec2_get(L, 2);
+            Vec2* data = lua_vec2_push(L);
+
+            data->x = a->x * b->x;
+            data->y = a->y * b->y;
+
+            return 1;
+        },
+        nullptr, 0, nullptr);
+    lua_setfield(L, -2, "__mul");
+
+    lua_pushcclosurek(
+        L,
+        [](lua_State* L) {
+            Vec2* a = lua_vec2_get(L, 1);
+            Vec2* b = lua_vec2_get(L, 2);
+            Vec2* data = lua_vec2_push(L);
+
+            data->x = a->x / b->x;
+            data->y = a->y / b->y;
+
+            return 1;
+        },
+        nullptr, 0, nullptr);
+    lua_setfield(L, -2, "__div");
+
+    lua_pushcclosurek(
+        L,
+        [](lua_State* L) {
+            Vec2* a = lua_vec2_get(L, 1);
+            Vec2* data = lua_vec2_push(L);
+
+            data->x = -a->x;
+            data->y = -a->y;
+
+            return 1;
+        },
+        nullptr, 0, nullptr);
+    lua_setfield(L, -2, "__unm");
+
+    lua_setreadonly(L, -1, true);
+
+    // ctor
+    lua_pushcfunction(L, lua_vec2, "vec2");
+    lua_setglobal(L, "vec2");
+
+    lua_pop(L, 1);
+}
+
+static void setupNativeHelpers(lua_State* L)
+{
+    lua_pushcclosurek(
+        L,
+        [](lua_State* L) -> int {
+            extern int luaG_isnative(lua_State * L, int level);
+
+            lua_pushboolean(L, luaG_isnative(L, 1));
+            return 1;
+        },
+        "is_native", 0, nullptr);
+    lua_setglobal(L, "is_native");
+}
+
 static std::vector<Luau::CodeGen::FunctionBytecodeSummary> analyzeFile(const char* source, const unsigned nestingLimit)
 {
     Luau::BytecodeBuilder bcb;
@@ -287,6 +567,7 @@ static std::vector<Luau::CodeGen::FunctionBytecodeSummary> analyzeFile(const cha
     Luau::CompileOptions options;
     options.optimizationLevel = optimizationLevel;
     options.debugLevel = 1;
+    options.typeInfoLevel = 1;
 
     compileOrThrow(bcb, source, options);
 
@@ -486,32 +767,51 @@ TEST_CASE("Pack")
 
 TEST_CASE("Vector")
 {
+    lua_CompileOptions copts = defaultOptions();
+    Luau::CodeGen::CompilationOptions nativeOpts = defaultCodegenOptions();
+
+    SUBCASE("NoIrHooks")
+    {
+        SUBCASE("O0")
+        {
+            copts.optimizationLevel = 0;
+        }
+        SUBCASE("O1")
+        {
+            copts.optimizationLevel = 1;
+        }
+        SUBCASE("O2")
+        {
+            copts.optimizationLevel = 2;
+        }
+    }
+    SUBCASE("IrHooks")
+    {
+        nativeOpts.hooks.vectorAccessBytecodeType = vectorAccessBytecodeType;
+        nativeOpts.hooks.vectorNamecallBytecodeType = vectorNamecallBytecodeType;
+        nativeOpts.hooks.vectorAccess = vectorAccess;
+        nativeOpts.hooks.vectorNamecall = vectorNamecall;
+
+        SUBCASE("O0")
+        {
+            copts.optimizationLevel = 0;
+        }
+        SUBCASE("O1")
+        {
+            copts.optimizationLevel = 1;
+        }
+        SUBCASE("O2")
+        {
+            copts.optimizationLevel = 2;
+        }
+    }
+
     runConformance(
         "vector.lua",
         [](lua_State* L) {
-            lua_pushcfunction(L, lua_vector, "vector");
-            lua_setglobal(L, "vector");
-
-#if LUA_VECTOR_SIZE == 4
-            lua_pushvector(L, 0.0f, 0.0f, 0.0f, 0.0f);
-#else
-            lua_pushvector(L, 0.0f, 0.0f, 0.0f);
-#endif
-            luaL_newmetatable(L, "vector");
-
-            lua_pushstring(L, "__index");
-            lua_pushcfunction(L, lua_vector_index, nullptr);
-            lua_settable(L, -3);
-
-            lua_pushstring(L, "__namecall");
-            lua_pushcfunction(L, lua_vector_namecall, nullptr);
-            lua_settable(L, -3);
-
-            lua_setreadonly(L, -1, true);
-            lua_setmetatable(L, -2);
-            lua_pop(L, 1);
+            setupVectorHelpers(L);
         },
-        nullptr, nullptr, nullptr);
+        nullptr, nullptr, &copts, false, &nativeOpts);
 }
 
 static void populateRTTI(lua_State* L, Luau::TypeId type)
@@ -764,6 +1064,17 @@ TEST_CASE("Debugger")
                 CHECK(lua_isnil(L, -1));
                 lua_pop(L, 1);
             }
+            else if (breakhits == 15)
+            {
+                // test lua_getlocal
+                const char* x = lua_getlocal(L, 2, 1);
+                REQUIRE(x);
+                CHECK(strcmp(x, "x") == 0);
+                lua_pop(L, 1);
+
+                const char* a1 = lua_getlocal(L, 2, 2);
+                REQUIRE(!a1);
+            }
 
             if (interruptedthread)
             {
@@ -773,7 +1084,7 @@ TEST_CASE("Debugger")
         },
         nullptr, &copts, /* skipCodegen */ true); // Native code doesn't support debugging yet
 
-    CHECK(breakhits == 14); // 2 hits per breakpoint
+    CHECK(breakhits == 16); // 2 hits per breakpoint
 
     if (singlestep)
         CHECK(stephits > 100); // note; this will depend on number of instructions which can vary, so we just make sure the callback gets hit often
@@ -881,6 +1192,17 @@ TEST_CASE("NewUserdataOverflow")
 
     CHECK(lua_pcall(L, 0, 0, 0) == LUA_ERRRUN);
     CHECK(strcmp(lua_tostring(L, -1), "memory allocation error: block too big") == 0);
+}
+
+TEST_CASE("SandboxWithoutLibs")
+{
+    StateRef globalState(luaL_newstate(), lua_close);
+    lua_State* L = globalState.get();
+
+    luaopen_base(L); // Load only base library
+    luaL_sandbox(L);
+
+    CHECK(lua_getreadonly(L, LUA_GLOBALSINDEX));
 }
 
 TEST_CASE("ApiTables")
@@ -1426,8 +1748,6 @@ TEST_CASE("Coverage")
 
 TEST_CASE("StringConversion")
 {
-    ScopedFastFlag luauSciNumberSkipTrailDot{FFlag::LuauSciNumberSkipTrailDot, true};
-
     runConformance("strconv.lua");
 }
 
@@ -1607,6 +1927,45 @@ TEST_CASE("Interrupt")
         // abandon the thread
         lua_pop(L, 1);
     }
+
+    lua_callbacks(L)->interrupt = [](lua_State* L, int gc) {
+        if (gc >= 0)
+            return;
+
+        index++;
+
+        if (index == 1'000)
+        {
+            index = 0;
+            luaL_error(L, "timeout");
+        }
+    };
+
+    for (int test = 1; test <= 5; ++test)
+    {
+        lua_State* T = lua_newthread(L);
+
+        std::string name = "strhang" + std::to_string(test);
+        lua_getglobal(T, name.c_str());
+
+        index = 0;
+        int status = lua_resume(T, nullptr, 0);
+        CHECK(status == LUA_ERRRUN);
+
+        lua_pop(L, 1);
+    }
+
+    {
+        lua_State* T = lua_newthread(L);
+
+        lua_getglobal(T, "strhangpcall");
+
+        index = 0;
+        int status = lua_resume(T, nullptr, 0);
+        CHECK(status == LUA_OK);
+
+        lua_pop(L, 1);
+    }
 }
 
 TEST_CASE("UserdataApi")
@@ -1673,15 +2032,35 @@ TEST_CASE("UserdataApi")
     luaL_newmetatable(L, "udata2");
 
     void* ud5 = lua_newuserdata(L, 0);
-    lua_getfield(L, LUA_REGISTRYINDEX, "udata1");
+    luaL_getmetatable(L, "udata1");
     lua_setmetatable(L, -2);
 
     void* ud6 = lua_newuserdata(L, 0);
-    lua_getfield(L, LUA_REGISTRYINDEX, "udata2");
+    luaL_getmetatable(L, "udata2");
     lua_setmetatable(L, -2);
 
     CHECK(luaL_checkudata(L, -2, "udata1") == ud5);
     CHECK(luaL_checkudata(L, -1, "udata2") == ud6);
+
+    // tagged user data with fast metatable access
+    luaL_newmetatable(L, "udata3");
+    luaL_getmetatable(L, "udata3");
+    lua_setuserdatametatable(L, 50, -1);
+
+    luaL_newmetatable(L, "udata4");
+    luaL_getmetatable(L, "udata4");
+    lua_setuserdatametatable(L, 51, -1);
+
+    void* ud7 = lua_newuserdatatagged(L, 16, 50);
+    lua_getuserdatametatable(L, 50);
+    lua_setmetatable(L, -2);
+
+    void* ud8 = lua_newuserdatatagged(L, 16, 51);
+    lua_getuserdatametatable(L, 51);
+    lua_setmetatable(L, -2);
+
+    CHECK(luaL_checkudata(L, -2, "udata3") == ud7);
+    CHECK(luaL_checkudata(L, -1, "udata4") == ud8);
 
     globalState.reset();
 
@@ -1690,8 +2069,6 @@ TEST_CASE("UserdataApi")
 
 TEST_CASE("LightuserdataApi")
 {
-    ScopedFastFlag luauTaggedLuData{FFlag::LuauTaggedLuData, true};
-
     StateRef globalState(luaL_newstate(), lua_close);
     lua_State* L = globalState.get();
 
@@ -1737,7 +2114,34 @@ TEST_CASE("LightuserdataApi")
 
     lua_pop(L, 1);
 
+    if (FFlag::LuauPreserveLudataRenaming)
+    {
+        // Still possible to rename the global lightuserdata name using a metatable
+        lua_pushlightuserdata(L, value);
+        CHECK(strcmp(luaL_typename(L, -1), "userdata") == 0);
+
+        lua_createtable(L, 0, 1);
+        lua_pushstring(L, "luserdata");
+        lua_setfield(L, -2, "__type");
+        lua_setmetatable(L, -2);
+
+        CHECK(strcmp(luaL_typename(L, -1), "luserdata") == 0);
+        lua_pop(L, 1);
+    }
+
     globalState.reset();
+}
+
+TEST_CASE("DebugApi")
+{
+    StateRef globalState(luaL_newstate(), lua_close);
+    lua_State* L = globalState.get();
+
+    lua_pushnumber(L, 10);
+
+    lua_Debug ar;
+    CHECK(lua_getinfo(L, -1, "f", &ar) == 0);  // number is not a function
+    CHECK(lua_getinfo(L, -10, "f", &ar) == 0); // not on stack
 }
 
 TEST_CASE("Iter")
@@ -1746,7 +2150,6 @@ TEST_CASE("Iter")
 }
 
 const int kInt64Tag = 1;
-static int gInt64MT = -1;
 
 static int64_t getInt64(lua_State* L, int idx)
 {
@@ -1763,7 +2166,7 @@ static void pushInt64(lua_State* L, int64_t value)
 {
     void* p = lua_newuserdatatagged(L, sizeof(int64_t), kInt64Tag);
 
-    lua_getref(L, gInt64MT);
+    luaL_getmetatable(L, "int64");
     lua_setmetatable(L, -2);
 
     *static_cast<int64_t*>(p) = value;
@@ -1773,8 +2176,7 @@ TEST_CASE("Userdata")
 {
     runConformance("userdata.lua", [](lua_State* L) {
         // create metatable with all the metamethods
-        lua_newtable(L);
-        gInt64MT = lua_ref(L, -1);
+        luaL_newmetatable(L, "int64");
 
         // __index
         lua_pushcfunction(
@@ -1966,7 +2368,23 @@ TEST_CASE("SafeEnv")
 
 TEST_CASE("Native")
 {
-    runConformance("native.lua");
+    // This tests requires code to run natively, otherwise all 'is_native' checks will fail
+    if (!codegen || !luau_codegen_supported())
+        return;
+
+    SUBCASE("Checked")
+    {
+        FFlag::DebugLuauAbortingChecks.value = true;
+    }
+
+    SUBCASE("Regular")
+    {
+        FFlag::DebugLuauAbortingChecks.value = false;
+    }
+
+    runConformance("native.lua", [](lua_State* L) {
+        setupNativeHelpers(L);
+    });
 }
 
 TEST_CASE("NativeTypeAnnotations")
@@ -1975,40 +2393,93 @@ TEST_CASE("NativeTypeAnnotations")
     if (!codegen || !luau_codegen_supported())
         return;
 
-    runConformance(
-        "native_types.lua",
-        [](lua_State* L) {
-            // add is_native() function
-            lua_pushcclosurek(
-                L,
-                [](lua_State* L) -> int {
-                    extern int luaG_isnative(lua_State * L, int level);
-
-                    lua_pushboolean(L, luaG_isnative(L, 1));
-                    return 1;
-                },
-                "is_native", 0, nullptr);
-            lua_setglobal(L, "is_native");
-
-            // for vector tests
-            lua_pushcfunction(L, lua_vector, "vector");
-            lua_setglobal(L, "vector");
-
-#if LUA_VECTOR_SIZE == 4
-            lua_pushvector(L, 0.0f, 0.0f, 0.0f, 0.0f);
-#else
-            lua_pushvector(L, 0.0f, 0.0f, 0.0f);
-#endif
-            luaL_newmetatable(L, "vector");
-
-            lua_setreadonly(L, -1, true);
-            lua_setmetatable(L, -2);
-            lua_pop(L, 1);
-        },
-        nullptr, nullptr, nullptr);
+    runConformance("native_types.lua", [](lua_State* L) {
+        setupNativeHelpers(L);
+        setupVectorHelpers(L);
+    });
 }
 
-TEST_CASE("HugeFunction")
+TEST_CASE("NativeUserdata")
+{
+    lua_CompileOptions copts = defaultOptions();
+    Luau::CodeGen::CompilationOptions nativeOpts = defaultCodegenOptions();
+
+    static const char* kUserdataCompileTypes[] = {"vec2", "color", "mat3", nullptr};
+    copts.userdataTypes = kUserdataCompileTypes;
+
+    SUBCASE("NoIrHooks")
+    {
+        SUBCASE("O0")
+        {
+            copts.optimizationLevel = 0;
+        }
+        SUBCASE("O1")
+        {
+            copts.optimizationLevel = 1;
+        }
+        SUBCASE("O2")
+        {
+            copts.optimizationLevel = 2;
+        }
+    }
+    SUBCASE("IrHooks")
+    {
+        nativeOpts.hooks.vectorAccessBytecodeType = vectorAccessBytecodeType;
+        nativeOpts.hooks.vectorNamecallBytecodeType = vectorNamecallBytecodeType;
+        nativeOpts.hooks.vectorAccess = vectorAccess;
+        nativeOpts.hooks.vectorNamecall = vectorNamecall;
+
+        nativeOpts.hooks.userdataAccessBytecodeType = userdataAccessBytecodeType;
+        nativeOpts.hooks.userdataMetamethodBytecodeType = userdataMetamethodBytecodeType;
+        nativeOpts.hooks.userdataNamecallBytecodeType = userdataNamecallBytecodeType;
+        nativeOpts.hooks.userdataAccess = userdataAccess;
+        nativeOpts.hooks.userdataMetamethod = userdataMetamethod;
+        nativeOpts.hooks.userdataNamecall = userdataNamecall;
+
+        nativeOpts.userdataTypes = kUserdataRunTypes;
+
+        SUBCASE("O0")
+        {
+            copts.optimizationLevel = 0;
+        }
+        SUBCASE("O1")
+        {
+            copts.optimizationLevel = 1;
+        }
+        SUBCASE("O2")
+        {
+            copts.optimizationLevel = 2;
+        }
+    }
+
+    runConformance(
+        "native_userdata.lua",
+        [](lua_State* L) {
+            Luau::CodeGen::setUserdataRemapper(L, kUserdataRunTypes, [](void* context, const char* str, size_t len) -> uint8_t {
+                const char** types = (const char**)context;
+
+                uint8_t index = 0;
+
+                std::string_view sv{str, len};
+
+                for (; *types; ++types)
+                {
+                    if (sv == *types)
+                        return index;
+
+                    index++;
+                }
+
+                return 0xff;
+            });
+
+            setupVectorHelpers(L);
+            setupUserdataHelpers(L);
+        },
+        nullptr, nullptr, &copts, false, &nativeOpts);
+}
+
+[[nodiscard]] static std::string makeHugeFunctionSource()
 {
     std::string source;
 
@@ -2029,6 +2500,13 @@ TEST_CASE("HugeFunction")
     // use failed fast-calls with imports and constants to exercise all of the more complex fallback sequences
     source += "return bit32.lshift('84', -1)";
 
+    return source;
+}
+
+TEST_CASE("HugeFunction")
+{
+    std::string source = makeHugeFunctionSource();
+
     StateRef globalState(luaL_newstate(), lua_close);
     lua_State* L = globalState.get();
 
@@ -2047,12 +2525,84 @@ TEST_CASE("HugeFunction")
     REQUIRE(result == 0);
 
     if (codegen && luau_codegen_supported())
-        Luau::CodeGen::compile(L, -1, Luau::CodeGen::CodeGen_ColdFunctions);
+    {
+        Luau::CodeGen::CompilationOptions nativeOptions{Luau::CodeGen::CodeGen_ColdFunctions};
+        Luau::CodeGen::compile(L, -1, nativeOptions);
+    }
 
     int status = lua_resume(L, nullptr, 0);
     REQUIRE(status == 0);
 
     CHECK(lua_tonumber(L, -1) == 42);
+}
+
+TEST_CASE("HugeFunctionLoadFailure")
+{
+    // This test case verifies that if an out-of-memory error occurs inside of
+    // luau_load, we are not left with any GC objects in inconsistent states
+    // that would cause issues during garbage collection.
+    //
+    // We create a script with a huge function in it, then pass this to
+    // luau_load.  This should require two "large" allocations:  One for the
+    // code array and one for the constants array (k).  We run this test twice
+    // and fail each of these two allocations.
+    std::string source = makeHugeFunctionSource();
+
+    static const size_t expectedTotalLargeAllocations = 2;
+
+    static size_t largeAllocationToFail = 0;
+    static size_t largeAllocationCount = 0;
+
+    const auto testAllocate = [](void* ud, void* ptr, size_t osize, size_t nsize) -> void* {
+        if (nsize == 0)
+        {
+            free(ptr);
+            return nullptr;
+        }
+        else if (nsize > 32768)
+        {
+            if (largeAllocationCount == largeAllocationToFail)
+                return nullptr;
+
+            ++largeAllocationCount;
+            return realloc(ptr, nsize);
+        }
+        else
+        {
+            return realloc(ptr, nsize);
+        }
+    };
+
+    size_t bytecodeSize = 0;
+    char* const bytecode = luau_compile(source.data(), source.size(), nullptr, &bytecodeSize);
+
+    for (largeAllocationToFail = 0; largeAllocationToFail != expectedTotalLargeAllocations; ++largeAllocationToFail)
+    {
+        largeAllocationCount = 0;
+
+        StateRef globalState(lua_newstate(testAllocate, nullptr), lua_close);
+        lua_State* L = globalState.get();
+
+        luaL_openlibs(L);
+        luaL_sandbox(L);
+        luaL_sandboxthread(L);
+
+        try
+        {
+            luau_load(L, "=HugeFunction", bytecode, bytecodeSize, 0);
+            REQUIRE(false); // The luau_load should fail with an exception
+        }
+        catch (const std::exception& ex)
+        {
+            REQUIRE(strcmp(ex.what(), "lua_exception: not enough memory") == 0);
+        }
+
+        luaC_fullgc(L);
+    }
+
+    free(bytecode);
+
+    REQUIRE_EQ(largeAllocationToFail, expectedTotalLargeAllocations);
 }
 
 TEST_CASE("IrInstructionLimit")
@@ -2100,11 +2650,20 @@ TEST_CASE("IrInstructionLimit")
 
     REQUIRE(result == 0);
 
+    Luau::CodeGen::CompilationOptions nativeOptions{Luau::CodeGen::CodeGen_ColdFunctions};
     Luau::CodeGen::CompilationStats nativeStats = {};
-    Luau::CodeGen::CodeGenCompilationResult nativeResult = Luau::CodeGen::compile(L, -1, Luau::CodeGen::CodeGen_ColdFunctions, &nativeStats);
+    Luau::CodeGen::CompilationResult nativeResult = Luau::CodeGen::compile(L, -1, nativeOptions, &nativeStats);
 
     // Limit is not hit immediately, so with some functions compiled it should be a success
-    CHECK(nativeResult != Luau::CodeGen::CodeGenCompilationResult::CodeGenFailed);
+    CHECK(nativeResult.result == Luau::CodeGen::CodeGenCompilationResult::Success);
+
+    // But it has some failed functions
+    CHECK(nativeResult.hasErrors());
+    REQUIRE(!nativeResult.protoFailures.empty());
+
+    CHECK(nativeResult.protoFailures.front().result == Luau::CodeGen::CodeGenCompilationResult::CodeGenOverflowInstructionLimit);
+    CHECK(nativeResult.protoFailures.front().line != -1);
+    CHECK(nativeResult.protoFailures.front().debugname != "");
 
     // We should be able to compile at least one of our functions
     CHECK(nativeStats.functionsCompiled > 0);
@@ -2160,6 +2719,59 @@ end
     CHECK_EQ(summaries[3].getCounts(0),
         std::vector<unsigned>({0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}));
+}
+
+TEST_CASE("NativeAttribute")
+{
+    if (!codegen || !luau_codegen_supported())
+        return;
+
+    ScopedFastFlag sffs[] = {{FFlag::LuauNativeAttribute, true}};
+
+    std::string source = R"R(
+        @native
+        local function sum(x, y)
+            local function sumHelper(z)
+                return (x+y+z)
+            end
+            return sumHelper
+        end
+
+        local function sub(x, y)
+            @native
+            local function subHelper(z)
+                return (x+y-z)
+            end
+			return subHelper
+        end)R";
+
+    StateRef globalState(luaL_newstate(), lua_close);
+    lua_State* L = globalState.get();
+
+    luau_codegen_create(L);
+
+    luaL_openlibs(L);
+    luaL_sandbox(L);
+    luaL_sandboxthread(L);
+
+    size_t bytecodeSize = 0;
+    char* bytecode = luau_compile(source.data(), source.size(), nullptr, &bytecodeSize);
+    int result = luau_load(L, "=Code", bytecode, bytecodeSize, 0);
+    free(bytecode);
+
+    REQUIRE(result == 0);
+
+    Luau::CodeGen::CompilationOptions nativeOptions{Luau::CodeGen::CodeGen_ColdFunctions};
+    Luau::CodeGen::CompilationStats nativeStats = {};
+    Luau::CodeGen::CompilationResult nativeResult = Luau::CodeGen::compile(L, -1, nativeOptions, &nativeStats);
+
+    CHECK(nativeResult.result == Luau::CodeGen::CodeGenCompilationResult::Success);
+
+    CHECK(!nativeResult.hasErrors());
+    REQUIRE(nativeResult.protoFailures.empty());
+
+    // We should be able to compile at least one of our functions
+    CHECK_EQ(nativeStats.functionsCompiled, 2);
 }
 
 TEST_SUITE_END();

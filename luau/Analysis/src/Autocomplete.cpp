@@ -14,9 +14,6 @@
 #include <utility>
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
-LUAU_FASTFLAG(DebugLuauReadWriteProperties);
-LUAU_FASTFLAG(LuauClipExtraHasEndProps);
-LUAU_FASTFLAGVARIABLE(LuauAutocompleteStringLiteralBounds, false);
 
 static const std::unordered_set<std::string> kStatementStartingKeywords = {
     "while", "if", "local", "repeat", "function", "do", "for", "return", "break", "continue", "type", "export"};
@@ -161,7 +158,6 @@ static bool checkTypeMatch(TypeId subTy, TypeId superTy, NotNull<Scope> scope, T
 
         return unifier.canUnify(subTy, superTy).empty();
     }
-
 }
 
 static TypeCorrectKind checkTypeCorrectKind(
@@ -278,9 +274,9 @@ static void autocompleteProps(const Module& module, TypeArena* typeArena, NotNul
             {
                 Luau::TypeId type;
 
-                if (FFlag::DebugLuauReadWriteProperties)
+                if (FFlag::DebugLuauDeferredConstraintResolution)
                 {
-                    if (auto ty = prop.readType())
+                    if (auto ty = prop.readTy)
                         type = follow(*ty);
                     else
                         continue;
@@ -468,15 +464,12 @@ AutocompleteEntryMap autocompleteModuleTypes(const Module& module, Position posi
 
 static void autocompleteStringSingleton(TypeId ty, bool addQuotes, AstNode* node, Position position, AutocompleteEntryMap& result)
 {
-    if (FFlag::LuauAutocompleteStringLiteralBounds)
+    if (position == node->location.begin || position == node->location.end)
     {
-        if (position == node->location.begin || position == node->location.end)
-        {
-            if (auto str = node->as<AstExprConstantString>(); str && str->quoteStyle == AstExprConstantString::Quoted)
-                return;
-            else if (node->is<AstExprInterpString>())
-                return;
-        }
+        if (auto str = node->as<AstExprConstantString>(); str && str->quoteStyle == AstExprConstantString::Quoted)
+            return;
+        else if (node->is<AstExprInterpString>())
+            return;
     }
 
     auto formatKey = [addQuotes](const std::string& key) {
@@ -1068,51 +1061,30 @@ static AutocompleteEntryMap autocompleteStatement(
     for (const auto& kw : kStatementStartingKeywords)
         result.emplace(kw, AutocompleteEntry{AutocompleteEntryKind::Keyword});
 
-    if (FFlag::LuauClipExtraHasEndProps)
+    for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
     {
-        for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
+        if (AstStatForIn* statForIn = (*it)->as<AstStatForIn>(); statForIn && !statForIn->body->hasEnd)
+            result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
+        else if (AstStatFor* statFor = (*it)->as<AstStatFor>(); statFor && !statFor->body->hasEnd)
+            result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
+        else if (AstStatIf* statIf = (*it)->as<AstStatIf>())
         {
-            if (AstStatForIn* statForIn = (*it)->as<AstStatForIn>(); statForIn && !statForIn->body->hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-            else if (AstStatFor* statFor = (*it)->as<AstStatFor>(); statFor && !statFor->body->hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-            else if (AstStatIf* statIf = (*it)->as<AstStatIf>())
+            bool hasEnd = statIf->thenbody->hasEnd;
+            if (statIf->elsebody)
             {
-                bool hasEnd = statIf->thenbody->hasEnd;
-                if (statIf->elsebody)
-                {
-                    if (AstStatBlock* elseBlock = statIf->elsebody->as<AstStatBlock>())
-                        hasEnd = elseBlock->hasEnd;
-                }
-
-                if (!hasEnd)
-                    result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
+                if (AstStatBlock* elseBlock = statIf->elsebody->as<AstStatBlock>())
+                    hasEnd = elseBlock->hasEnd;
             }
-            else if (AstStatWhile* statWhile = (*it)->as<AstStatWhile>(); statWhile && !statWhile->body->hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-            else if (AstExprFunction* exprFunction = (*it)->as<AstExprFunction>(); exprFunction && !exprFunction->body->hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-            if (AstStatBlock* exprBlock = (*it)->as<AstStatBlock>(); exprBlock && !exprBlock->hasEnd)
+
+            if (!hasEnd)
                 result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
         }
-    }
-    else
-    {
-        for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it)
-        {
-            if (AstStatForIn* statForIn = (*it)->as<AstStatForIn>(); statForIn && !statForIn->DEPRECATED_hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-            else if (AstStatFor* statFor = (*it)->as<AstStatFor>(); statFor && !statFor->DEPRECATED_hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-            else if (AstStatIf* statIf = (*it)->as<AstStatIf>(); statIf && !statIf->DEPRECATED_hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-            else if (AstStatWhile* statWhile = (*it)->as<AstStatWhile>(); statWhile && !statWhile->DEPRECATED_hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-            else if (AstExprFunction* exprFunction = (*it)->as<AstExprFunction>(); exprFunction && !exprFunction->DEPRECATED_hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-            if (AstStatBlock* exprBlock = (*it)->as<AstStatBlock>(); exprBlock && !exprBlock->hasEnd)
-                result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-        }
+        else if (AstStatWhile* statWhile = (*it)->as<AstStatWhile>(); statWhile && !statWhile->body->hasEnd)
+            result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
+        else if (AstExprFunction* exprFunction = (*it)->as<AstExprFunction>(); exprFunction && !exprFunction->body->hasEnd)
+            result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
+        if (AstStatBlock* exprBlock = (*it)->as<AstStatBlock>(); exprBlock && !exprBlock->hasEnd)
+            result.emplace("end", AutocompleteEntry{AutocompleteEntryKind::Keyword});
     }
 
     if (ancestry.size() >= 2)
@@ -1127,16 +1099,8 @@ static AutocompleteEntryMap autocompleteStatement(
             }
         }
 
-        if (FFlag::LuauClipExtraHasEndProps)
-        {
-            if (AstStatRepeat* statRepeat = parent->as<AstStatRepeat>(); statRepeat && !statRepeat->body->hasEnd)
-                result.emplace("until", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-        }
-        else
-        {
-            if (AstStatRepeat* statRepeat = parent->as<AstStatRepeat>(); statRepeat && !statRepeat->DEPRECATED_hasUntil)
-                result.emplace("until", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-        }
+        if (AstStatRepeat* statRepeat = parent->as<AstStatRepeat>(); statRepeat && !statRepeat->body->hasEnd)
+            result.emplace("until", AutocompleteEntry{AutocompleteEntryKind::Keyword});
     }
 
     if (ancestry.size() >= 4)
@@ -1150,16 +1114,8 @@ static AutocompleteEntryMap autocompleteStatement(
         }
     }
 
-    if (FFlag::LuauClipExtraHasEndProps)
-    {
-        if (AstStatRepeat* statRepeat = extractStat<AstStatRepeat>(ancestry); statRepeat && !statRepeat->body->hasEnd)
-            result.emplace("until", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-    }
-    else
-    {
-        if (AstStatRepeat* statRepeat = extractStat<AstStatRepeat>(ancestry); statRepeat && !statRepeat->DEPRECATED_hasUntil)
-            result.emplace("until", AutocompleteEntry{AutocompleteEntryKind::Keyword});
-    }
+    if (AstStatRepeat* statRepeat = extractStat<AstStatRepeat>(ancestry); statRepeat && !statRepeat->body->hasEnd)
+        result.emplace("until", AutocompleteEntry{AutocompleteEntryKind::Keyword});
 
     return result;
 }
@@ -1780,6 +1736,37 @@ static AutocompleteResult autocomplete(const SourceModule& sourceModule, const M
             }
         }
     }
+    else if (AstExprTable* exprTable = node->as<AstExprTable>())
+    {
+        AutocompleteEntryMap result;
+
+        if (auto it = module->astExpectedTypes.find(exprTable))
+        {
+            result = autocompleteProps(*module, typeArena, builtinTypes, *it, PropIndexType::Key, ancestry);
+
+            // If the key type is a union of singleton strings,
+            // suggest those too.
+            if (auto ttv = get<TableType>(follow(*it)); ttv && ttv->indexer)
+            {
+                autocompleteStringSingleton(ttv->indexer->indexType, false, node, position, result);
+            }
+
+            // Remove keys that are already completed
+            for (const auto& item : exprTable->items)
+            {
+                if (!item.key)
+                    continue;
+
+                if (auto stringKey = item.key->as<AstExprConstantString>())
+                    result.erase(std::string(stringKey->value.data, stringKey->value.size));
+            }
+        }
+
+        // Also offer general expression suggestions
+        autocompleteExpression(sourceModule, *module, builtinTypes, typeArena, ancestry, position, result);
+
+        return {result, ancestry, AutocompleteContext::Property};
+    }
     else if (isIdentifier(node) && (parent->is<AstStatExpr>() || parent->is<AstStatError>()))
         return {autocompleteStatement(sourceModule, *module, ancestry, position), ancestry, AutocompleteContext::Statement};
 
@@ -1843,12 +1830,21 @@ AutocompleteResult autocomplete(Frontend& frontend, const ModuleName& moduleName
     if (!sourceModule)
         return {};
 
-    ModulePtr module = frontend.moduleResolverForAutocomplete.getModule(moduleName);
+    ModulePtr module;
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        module = frontend.moduleResolver.getModule(moduleName);
+    else
+        module = frontend.moduleResolverForAutocomplete.getModule(moduleName);
+
     if (!module)
         return {};
 
     NotNull<BuiltinTypes> builtinTypes = frontend.builtinTypes;
-    Scope* globalScope = frontend.globalsForAutocomplete.globalScope.get();
+    Scope* globalScope;
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        globalScope = frontend.globals.globalScope.get();
+    else
+        globalScope = frontend.globalsForAutocomplete.globalScope.get();
 
     TypeArena typeArena;
     return autocomplete(*sourceModule, module, builtinTypes, &typeArena, globalScope, position, callback);

@@ -167,11 +167,75 @@ end
 assert(pcall(fuzzfail17) == false)
 
 local function fuzzfail18()
-	return bit32.extract(7890276,0)
+  return bit32.extract(7890276,0)
 end
 
 assert(pcall(fuzzfail18) == true)
 assert(fuzzfail18() == 0)
+
+local function fuzzfail19()
+  local _ = 2
+  _ += _
+  _ = _,_ >= _,{_ >= _,_ >= _,_(),}
+
+  local _ = 2
+  do
+    _ = assert({n0=_,_,n0=_,}),{_={_[_()],},_,}
+  end
+end
+
+assert(pcall(fuzzfail19) == false)
+
+local function fuzzfail20()
+  assert(true)
+  assert(false,(_),true)
+  _ = nil
+end
+
+assert(pcall(fuzzfail20) == false)
+
+local function fuzzfail21(...)
+  local _ = assert,_
+  if _ then else return _ / _ end
+  _(_)
+  _(_,_)
+  assert(...,_)
+  _((not _),_)
+  _(true,_ / _)
+  _(_,_())
+  return _
+end
+
+assert(pcall(fuzzfail21) == false)
+
+local function fuzzfail22(...)
+  local _ = {false,},true,...,l0
+  while _ do
+  _ = true,{unpack(0,_),},l0
+  _.n126 = nil
+  _ = {not _,_=not _,n0=_,_,n0=not _,},_ < _
+  return _ > _
+  end
+  return `""`
+end
+
+assert(pcall(fuzzfail22) == false)
+
+local function fuzzfail23(...)
+  local _ = {false,},_,...,l0
+  while _ do
+  _ = true,{unpack(_),},l0
+  _ = {{[_]=nil,_=not _,_,true,_=nil,},not _,not _,_,bxor=- _,}
+  do end
+  break
+  end
+  do end
+  local _ = _,true
+  do end
+  local _ = _,true
+end
+
+assert(pcall(fuzzfail23) == false)
 
 local function arraySizeInv1()
   local t = {1, 2, nil, nil, nil, nil, nil, nil, nil, true}
@@ -292,5 +356,161 @@ function loopIteratorProtocol(a, t)
 end
 
 assert(loopIteratorProtocol(0, table.create(100, 5)) == 5058)
+
+function valueTrackingIssue1()
+  local b = buffer.create(1)
+  buffer.writeu8(b, 0, 0)
+  local v1
+
+  local function closure()
+    assert(type(b) == "buffer") -- b is the first upvalue
+    v1 = nil -- v1 is the second upvalue
+
+    -- prevent inlining
+    for i = 1, 100 do print(`{b} is {b}`) end
+  end
+
+  closure()
+end
+
+valueTrackingIssue1()
+
+local function vec3compsum(a: vector)
+  return a.X + a.Y + a.Z
+end
+
+assert(vec3compsum(vector(1, 2, 4)) == 7.0)
+
+local function vec3add(a: vector, b: vector) return a + b end
+local function vec3sub(a: vector, b: vector) return a - b end
+local function vec3mul(a: vector, b: vector) return a * b end
+local function vec3div(a: vector, b: vector) return a / b end
+local function vec3neg(a: vector) return -a end
+
+assert(vec3add(vector(10, 20, 40), vector(1, 0, 2)) == vector(11, 20, 42))
+assert(vec3sub(vector(10, 20, 40), vector(1, 0, 2)) == vector(9, 20, 38))
+assert(vec3mul(vector(10, 20, 40), vector(1, 0, 2)) == vector(10, 0, 80))
+assert(vec3div(vector(10, 20, 40), vector(1, 0, 2)) == vector(10, math.huge, 20))
+assert(vec3neg(vector(10, 20, 40)) == vector(-10, -20, -40))
+
+local function vec3mulnum(a: vector, b: number) return a * b end
+local function vec3mulconst(a: vector) return a * 4 end
+
+assert(vec3mulnum(vector(10, 20, 40), 4) == vector(40, 80, 160))
+assert(vec3mulconst(vector(10, 20, 40), 4) == vector(40, 80, 160))
+
+local function bufferbounds(zero)
+  local b1 = buffer.create(1)
+  local b2 = buffer.create(2)
+  local b4 = buffer.create(4)
+  local b8 = buffer.create(8)
+  local b10 = buffer.create(10)
+
+  -- only one valid position and size for a 1 byte buffer
+  buffer.writei8(b1, zero + 0, buffer.readi8(b1, zero + 0))
+  buffer.writeu8(b1, zero + 0, buffer.readu8(b1, zero + 0))
+
+  -- 2 byte buffer
+  buffer.writei8(b2, zero + 0, buffer.readi8(b2, zero + 0))
+  buffer.writeu8(b2, zero + 0, buffer.readu8(b2, zero + 0))
+  buffer.writei8(b2, zero + 1, buffer.readi8(b2, zero + 1))
+  buffer.writeu8(b2, zero + 1, buffer.readu8(b2, zero + 1))
+  buffer.writei16(b2, zero + 0, buffer.readi16(b2, zero + 0))
+  buffer.writeu16(b2, zero + 0, buffer.readu16(b2, zero + 0))
+
+  -- 4 byte buffer
+  buffer.writei8(b4, zero + 0, buffer.readi8(b4, zero + 0))
+  buffer.writeu8(b4, zero + 0, buffer.readu8(b4, zero + 0))
+  buffer.writei8(b4, zero + 3, buffer.readi8(b4, zero + 3))
+  buffer.writeu8(b4, zero + 3, buffer.readu8(b4, zero + 3))
+  buffer.writei16(b4, zero + 0, buffer.readi16(b4, zero + 0))
+  buffer.writeu16(b4, zero + 0, buffer.readu16(b4, zero + 0))
+  buffer.writei16(b4, zero + 2, buffer.readi16(b4, zero + 2))
+  buffer.writeu16(b4, zero + 2, buffer.readu16(b4, zero + 2))
+  buffer.writei32(b4, zero + 0, buffer.readi32(b4, zero + 0))
+  buffer.writeu32(b4, zero + 0, buffer.readu32(b4, zero + 0))
+  buffer.writef32(b4, zero + 0, buffer.readf32(b4, zero + 0))
+
+  -- 8 byte buffer
+  buffer.writei8(b8, zero + 0, buffer.readi8(b8, zero + 0))
+  buffer.writeu8(b8, zero + 0, buffer.readu8(b8, zero + 0))
+  buffer.writei8(b8, zero + 7, buffer.readi8(b8, zero + 7))
+  buffer.writeu8(b8, zero + 7, buffer.readu8(b8, zero + 7))
+  buffer.writei16(b8, zero + 0, buffer.readi16(b8, zero + 0))
+  buffer.writeu16(b8, zero + 0, buffer.readu16(b8, zero + 0))
+  buffer.writei16(b8, zero + 6, buffer.readi16(b8, zero + 6))
+  buffer.writeu16(b8, zero + 6, buffer.readu16(b8, zero + 6))
+  buffer.writei32(b8, zero + 0, buffer.readi32(b8, zero + 0))
+  buffer.writeu32(b8, zero + 0, buffer.readu32(b8, zero + 0))
+  buffer.writef32(b8, zero + 0, buffer.readf32(b8, zero + 0))
+  buffer.writei32(b8, zero + 4, buffer.readi32(b8, zero + 4))
+  buffer.writeu32(b8, zero + 4, buffer.readu32(b8, zero + 4))
+  buffer.writef32(b8, zero + 4, buffer.readf32(b8, zero + 4))
+  buffer.writef64(b8, zero + 0, buffer.readf64(b8, zero + 0))
+
+  -- 'any' size buffer
+  buffer.writei8(b10, zero + 0, buffer.readi8(b10, zero + 0))
+  buffer.writeu8(b10, zero + 0, buffer.readu8(b10, zero + 0))
+  buffer.writei8(b10, zero + 9, buffer.readi8(b10, zero + 9))
+  buffer.writeu8(b10, zero + 9, buffer.readu8(b10, zero + 9))
+  buffer.writei16(b10, zero + 0, buffer.readi16(b10, zero + 0))
+  buffer.writeu16(b10, zero + 0, buffer.readu16(b10, zero + 0))
+  buffer.writei16(b10, zero + 8, buffer.readi16(b10, zero + 8))
+  buffer.writeu16(b10, zero + 8, buffer.readu16(b10, zero + 8))
+  buffer.writei32(b10, zero + 0, buffer.readi32(b10, zero + 0))
+  buffer.writeu32(b10, zero + 0, buffer.readu32(b10, zero + 0))
+  buffer.writef32(b10, zero + 0, buffer.readf32(b10, zero + 0))
+  buffer.writei32(b10, zero + 6, buffer.readi32(b10, zero + 6))
+  buffer.writeu32(b10, zero + 6, buffer.readu32(b10, zero + 6))
+  buffer.writef32(b10, zero + 6, buffer.readf32(b10, zero + 6))
+  buffer.writef64(b10, zero + 0, buffer.readf64(b10, zero + 0))
+  buffer.writef64(b10, zero + 2, buffer.readf64(b10, zero + 2))
+
+  assert(is_native())
+end
+
+bufferbounds(0)
+
+function deadStoreChecks1()
+  local a = 1.0
+  local b = 0.0
+
+  local function update()
+    b += a
+    for i = 1, 100 do print(`{b} is {b}`) end
+  end
+
+  update()
+  a = 10
+  update()
+  a = 100
+  update()
+
+  return b
+end
+
+assert(deadStoreChecks1() == 111)
+
+local function extramath1(a)
+  return type(math.sign(a))
+end
+
+assert(extramath1(2) == "number")
+assert(extramath1("2") == "number")
+
+local function extramath2(a)
+  return type(math.modf(a))
+end
+
+assert(extramath2(2) == "number")
+assert(extramath2("2") == "number")
+
+local function extramath3(a)
+  local b, c = math.modf(a)
+  return type(c)
+end
+
+assert(extramath3(2) == "number")
+assert(extramath3("2") == "number")
 
 return('OK')

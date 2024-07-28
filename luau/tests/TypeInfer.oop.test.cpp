@@ -2,8 +2,6 @@
 
 #include "Luau/AstQuery.h"
 #include "Luau/BuiltinDefinitions.h"
-#include "Luau/Scope.h"
-#include "Luau/TypeInfer.h"
 #include "Luau/Type.h"
 #include "Luau/VisitType.h"
 
@@ -15,7 +13,6 @@
 using namespace Luau;
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
-LUAU_FASTFLAG(LuauStacklessTypeClone3);
 
 TEST_SUITE_BEGIN("TypeInferOOP");
 
@@ -219,7 +216,7 @@ TEST_CASE_FIXTURE(Fixture, "inferred_methods_of_free_tables_have_the_same_level_
     check(R"(
         function Base64FileReader(data)
             local reader = {}
-            local index: number
+            local index: number = 0
 
             function reader:PeekByte()
                 return data:byte(index)
@@ -416,7 +413,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "promise_type_error_too_complex" * doctest::t
     // TODO: LTI changes to function call resolution have rendered this test impossibly slow
     // shared self should fix it, but there may be other mitigations possible as well
     REQUIRE(!FFlag::DebugLuauDeferredConstraintResolution);
-    ScopedFastFlag sff{FFlag::LuauStacklessTypeClone3, true};
 
     frontend.options.retainFullTypeGraphs = false;
 
@@ -500,6 +496,54 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "promise_type_error_too_complex" * doctest::t
     )");
 
     LUAU_REQUIRE_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(Fixture, "method_should_not_create_cyclic_type")
+{
+    ScopedFastFlag sff(FFlag::DebugLuauDeferredConstraintResolution, true);
+
+    CheckResult result = check(R"(
+        local Component = {}
+
+        function Component:__resolveUpdate(incomingState)
+            local oldState = self.state
+            incomingState = oldState
+            self.state = incomingState
+        end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "cross_module_metatable")
+{
+    fileResolver.source["game/A"] = R"(
+        --!strict
+        local cls = {}
+        cls.__index = cls
+        function cls:abc() return 4 end
+        return cls
+    )";
+
+    fileResolver.source["game/B"] = R"(
+        --!strict
+        local cls = require(game.A)
+        local tbl = {}
+        setmetatable(tbl, cls)
+    )";
+
+    CheckResult result = frontend.check("game/B");
+    LUAU_REQUIRE_NO_ERRORS(result);
+
+    ModulePtr b = frontend.moduleResolver.getModule("game/B");
+    REQUIRE(b);
+
+    std::optional<Binding> clsBinding = b->getModuleScope()->linearSearchForBinding("tbl");
+    REQUIRE(clsBinding);
+
+    TypeId clsType = clsBinding->typeId;
+
+    CHECK("{ @metatable cls, tbl }" == toString(clsType));
 }
 
 TEST_SUITE_END();

@@ -13,7 +13,7 @@ using namespace Luau;
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
 LUAU_FASTFLAG(LuauAlwaysCommitInferencesOfFunctionCalls);
-LUAU_FASTFLAG(LuauTransitiveSubtyping);
+LUAU_FASTFLAG(LuauUnifierRecursionOnRestart);
 
 struct TryUnifyFixture : Fixture
 {
@@ -32,10 +32,6 @@ TEST_SUITE_BEGIN("TryUnifyTests");
 
 TEST_CASE_FIXTURE(TryUnifyFixture, "primitives_unify")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     Type numberOne{TypeVariant{PrimitiveType{PrimitiveType::Number}}};
     Type numberTwo = numberOne;
 
@@ -47,10 +43,6 @@ TEST_CASE_FIXTURE(TryUnifyFixture, "primitives_unify")
 
 TEST_CASE_FIXTURE(TryUnifyFixture, "compatible_functions_are_unified")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     Type functionOne{
         TypeVariant{FunctionType(arena.addTypePack({arena.freshType(globalScope->level)}), arena.addTypePack({builtinTypes->numberType}))}};
 
@@ -68,10 +60,6 @@ TEST_CASE_FIXTURE(TryUnifyFixture, "compatible_functions_are_unified")
 
 TEST_CASE_FIXTURE(TryUnifyFixture, "incompatible_functions_are_preserved")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     TypePackVar argPackOne{TypePack{{arena.freshType(globalScope->level)}, std::nullopt}};
     Type functionOne{
         TypeVariant{FunctionType(arena.addTypePack({arena.freshType(globalScope->level)}), arena.addTypePack({builtinTypes->numberType}))}};
@@ -94,10 +82,6 @@ TEST_CASE_FIXTURE(TryUnifyFixture, "incompatible_functions_are_preserved")
 
 TEST_CASE_FIXTURE(TryUnifyFixture, "tables_can_be_unified")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     Type tableOne{TypeVariant{
         TableType{{{"foo", {arena.freshType(globalScope->level)}}}, std::nullopt, globalScope->level, TableState::Unsealed},
     }};
@@ -120,10 +104,6 @@ TEST_CASE_FIXTURE(TryUnifyFixture, "tables_can_be_unified")
 
 TEST_CASE_FIXTURE(TryUnifyFixture, "incompatible_tables_are_preserved")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     Type tableOne{TypeVariant{
         TableType{{{"foo", {arena.freshType(globalScope->level)}}, {"bar", {builtinTypes->numberType}}}, std::nullopt, globalScope->level,
             TableState::Unsealed},
@@ -352,10 +332,6 @@ TEST_CASE_FIXTURE(TryUnifyFixture, "txnlog_preserves_pack_owner")
 
 TEST_CASE_FIXTURE(TryUnifyFixture, "metatables_unify_against_shape_of_free_table")
 {
-    ScopedFastFlag sff[] = {
-        {FFlag::LuauTransitiveSubtyping, true},
-    };
-
     TableType::Props freeProps{
         {"foo", {builtinTypes->numberType}},
     };
@@ -503,6 +479,36 @@ TEST_CASE_FIXTURE(TryUnifyFixture, "unifying_two_unions_under_dcr_does_not_creat
         REQUIRE(bt);
         CHECK(bt->boundTo == outerType);
     }
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "table_unification_full_restart_recursion")
+{
+    ScopedFastFlag luauUnifierRecursionOnRestart{FFlag::LuauUnifierRecursionOnRestart, true};
+
+    CheckResult result = check(R"(
+local A, B, C, D
+
+E = function(a, b)
+    local mt = getmetatable(b)
+    if mt.tm:bar(A) == nil and mt.tm:bar(B) == nil then end
+    if mt.foo == true then D(b, 3) end
+    mt.foo:call(false, b)
+end
+
+A = function(a, b)
+    local mt = getmetatable(b)
+    if mt.foo == true then D(b, 3) end
+    C(mt, 3)
+end
+
+B = function(a, b)
+    local mt = getmetatable(b)
+    if mt.foo == true then D(b, 3) end
+    C(mt, 3)
+end
+    )");
+
+    LUAU_REQUIRE_ERRORS(result);
 }
 
 TEST_SUITE_END();

@@ -15,6 +15,7 @@
 #include <algorithm>
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
+LUAU_FASTFLAGVARIABLE(LuauSkipEmptyInstantiations, false);
 
 namespace Luau
 {
@@ -115,9 +116,22 @@ struct ClonePublicInterface : Substitution
         TypeId result = clone(ty);
 
         if (FunctionType* ftv = getMutable<FunctionType>(result))
+        {
+            if (FFlag::LuauSkipEmptyInstantiations && ftv->generics.empty() && ftv->genericPacks.empty())
+            {
+                GenericTypeFinder marker;
+                marker.traverse(result);
+
+                if (!marker.found)
+                    ftv->hasNoFreeOrGenericTypes = true;
+            }
+
             ftv->level = TypeLevel{0, 0};
+        }
         else if (TableType* ttv = getMutable<TableType>(result))
+        {
             ttv->level = TypeLevel{0, 0};
+        }
 
         return result;
     }
@@ -196,9 +210,6 @@ Module::~Module()
 
 void Module::clonePublicInterface(NotNull<BuiltinTypes> builtinTypes, InternalErrorReporter& ice)
 {
-    LUAU_ASSERT(interfaceTypes.types.empty());
-    LUAU_ASSERT(interfaceTypes.typePacks.empty());
-
     CloneState cloneState{builtinTypes};
 
     ScopePtr moduleScope = getModuleScope();

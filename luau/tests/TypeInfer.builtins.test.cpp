@@ -10,7 +10,6 @@ using namespace Luau;
 
 LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
 LUAU_FASTFLAG(LuauAlwaysCommitInferencesOfFunctionCalls);
-LUAU_FASTFLAG(LuauSetMetatableOnUnionsOfTables);
 
 TEST_SUITE_BEGIN("BuiltinTests");
 
@@ -371,8 +370,6 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "setmetatable_unpacks_arg_types_correctly")
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "setmetatable_on_union_of_tables")
 {
-    ScopedFastFlag sff{FFlag::LuauSetMetatableOnUnionsOfTables, true};
-
     CheckResult result = check(R"(
         type A = {tag: "A", x: number}
         type B = {tag: "B", y: string}
@@ -386,10 +383,7 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "setmetatable_on_union_of_tables")
 
     LUAU_REQUIRE_NO_ERRORS(result);
 
-    if (FFlag::DebugLuauDeferredConstraintResolution)
-        CHECK("{ @metatable {|  |}, A } | { @metatable {|  |}, B }" == toString(requireTypeAlias("X")));
-    else
-        CHECK("{ @metatable {  }, A } | { @metatable {  }, B }" == toString(requireTypeAlias("X")));
+    CHECK("{ @metatable {  }, A } | { @metatable {  }, B }" == toString(requireTypeAlias("X")));
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "table_insert_correctly_infers_type_of_array_2_args_overload")
@@ -704,8 +698,18 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "bad_select_should_not_crash")
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(2, result);
-    CHECK_EQ("Argument count mismatch. Function '_' expects at least 1 argument, but none are specified", toString(result.errors[0]));
-    CHECK_EQ("Argument count mismatch. Function 'select' expects 1 argument, but none are specified", toString(result.errors[1]));
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+    {
+        // The argument count is the same, but the errors are currently cyclic type family instance ones.
+        // This isn't great, but the desired behavior here was that it didn't cause a crash and that is still true.
+        // The larger fix for this behavior will likely be integration of egraph-based normalization throughout the new solver.
+    }
+    else
+    {
+        CHECK_EQ("Argument count mismatch. Function '_' expects at least 1 argument, but none are specified", toString(result.errors[0]));
+        CHECK_EQ("Argument count mismatch. Function 'select' expects 1 argument, but none are specified", toString(result.errors[1]));
+    }
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "select_way_out_of_range")
@@ -948,7 +952,10 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "tonumber_returns_optional_number_type")
     )");
 
     LUAU_REQUIRE_ERROR_COUNT(1, result);
-    CHECK_EQ("Type 'number?' could not be converted into 'number'", toString(result.errors[0]));
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ("Type 'number?' could not be converted into 'number'; type number?[1] (nil) is not a subtype of number (number)", toString(result.errors[0]));
+    else
+        CHECK_EQ("Type 'number?' could not be converted into 'number'", toString(result.errors[0]));
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "tonumber_returns_optional_number_type2")
@@ -997,7 +1004,11 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "assert_removes_falsy_types")
     )");
 
     LUAU_REQUIRE_NO_ERRORS(result);
-    CHECK_EQ("((boolean | number)?) -> boolean | number", toString(requireType("f")));
+
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ("((boolean | number)?) -> number | true", toString(requireType("f")));
+    else
+        CHECK_EQ("((boolean | number)?) -> boolean | number", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "assert_removes_falsy_types2")
@@ -1010,6 +1021,22 @@ TEST_CASE_FIXTURE(BuiltinsFixture, "assert_removes_falsy_types2")
 
     LUAU_REQUIRE_NO_ERRORS(result);
     CHECK_EQ("((boolean | number)?) -> number | true", toString(requireType("f")));
+}
+
+TEST_CASE_FIXTURE(BuiltinsFixture, "assert_removes_falsy_types3")
+{
+    CheckResult result = check(R"(
+        local function f(x: (number | boolean)?)
+            assert(x)
+            return x
+        end
+    )");
+
+    LUAU_REQUIRE_NO_ERRORS(result);
+    if (FFlag::DebugLuauDeferredConstraintResolution)
+        CHECK_EQ("((boolean | number)?) -> number | true", toString(requireType("f")));
+    else // without the annotation, the old solver doesn't infer the best return type here
+        CHECK_EQ("((boolean | number)?) -> boolean | number", toString(requireType("f")));
 }
 
 TEST_CASE_FIXTURE(BuiltinsFixture, "assert_removes_falsy_types_even_from_type_pack_tail_but_only_for_the_first_type")

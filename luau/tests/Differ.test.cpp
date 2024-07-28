@@ -204,6 +204,8 @@ TEST_CASE_FIXTURE(DifferFixture, "right_cyclic_table_left_table_property_wrong")
 
 TEST_CASE_FIXTURE(DifferFixture, "equal_table_two_cyclic_tables_are_not_different")
 {
+    ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, false};
+
     CheckResult result = check(R"(
     local function id<a>(x: a): a
       return x
@@ -774,12 +776,18 @@ TEST_CASE_FIXTURE(DifferFixtureWithBuiltins, "negation")
         if typeof(almostBar.x.y) ~= "number" then
             almostFoo = almostBar
         end
-
     )");
     LUAU_REQUIRE_NO_ERRORS(result);
 
     compareTypesNe("foo", "almostFoo",
-        R"(DiffError: these two types are not equal because the left type at <unlabeled-symbol>.x.y.Negation has type string, while the right type at <unlabeled-symbol>.x.y.Negation has type number)");
+        R"(DiffError: these two types are not equal because the left type at <unlabeled-symbol> is a union containing type { x: { y: ~string } }, while the right type at <unlabeled-symbol> is a union missing type { x: { y: ~string } })");
+
+    // TODO: a more desirable expected error here is as below, but `Differ` requires improvements to
+    // dealing with unions to get something like this (recognizing that the union is identical
+    // except in one component where they differ).
+    //
+    // compareTypesNe("foo", "almostFoo",
+    //    R"(DiffError: these two types are not equal because the left type at <unlabeled-symbol>.x.y.Negation has type string, while the right type at <unlabeled-symbol>.x.y.Negation has type number)");
 }
 
 TEST_CASE_FIXTURE(DifferFixture, "union_missing_right")

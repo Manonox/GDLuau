@@ -45,11 +45,11 @@ struct GlobalOptions
 {
     int optimizationLevel = 1;
     int debugLevel = 1;
+    int typeInfoLevel = 0;
 
-    std::string vectorLib;
-    std::string vectorCtor;
-    std::string vectorType;
-
+    const char* vectorLib = nullptr;
+    const char* vectorCtor = nullptr;
+    const char* vectorType = nullptr;
 } globalOptions;
 
 static Luau::CompileOptions copts()
@@ -57,11 +57,11 @@ static Luau::CompileOptions copts()
     Luau::CompileOptions result = {};
     result.optimizationLevel = globalOptions.optimizationLevel;
     result.debugLevel = globalOptions.debugLevel;
+    result.typeInfoLevel = globalOptions.typeInfoLevel;
 
-    // globalOptions outlive the CompileOptions, so it's safe to use string data pointers here
-    result.vectorLib = globalOptions.vectorLib.c_str();
-    result.vectorCtor = globalOptions.vectorCtor.c_str();
-    result.vectorType = globalOptions.vectorType.c_str();
+    result.vectorLib = globalOptions.vectorLib;
+    result.vectorCtor = globalOptions.vectorCtor;
+    result.vectorType = globalOptions.vectorType;
 
     return result;
 }
@@ -317,6 +317,7 @@ static bool compileFile(const char* name, CompileFormat format, Luau::CodeGen::A
         {
             options.includeAssembly = format != CompileFormat::CodegenIr;
             options.includeIr = format != CompileFormat::CodegenAsm;
+            options.includeIrTypes = format != CompileFormat::CodegenAsm;
             options.includeOutlinedCode = format == CompileFormat::CodegenVerbose;
         }
 
@@ -326,7 +327,7 @@ static bool compileFile(const char* name, CompileFormat format, Luau::CodeGen::A
         if (format == CompileFormat::Text)
         {
             bcb.setDumpFlags(Luau::BytecodeBuilder::Dump_Code | Luau::BytecodeBuilder::Dump_Source | Luau::BytecodeBuilder::Dump_Locals |
-                             Luau::BytecodeBuilder::Dump_Remarks);
+                             Luau::BytecodeBuilder::Dump_Remarks | Luau::BytecodeBuilder::Dump_Types);
             bcb.setDumpSource(*source);
         }
         else if (format == CompileFormat::Remarks)
@@ -488,6 +489,16 @@ int main(int argc, char** argv)
                 return 1;
             }
             globalOptions.debugLevel = level;
+        }
+        else if (strncmp(argv[i], "-t", 2) == 0)
+        {
+            int level = atoi(argv[i] + 2);
+            if (level < 0 || level > 1)
+            {
+                fprintf(stderr, "Error: Type info level must be between 0 and 1 inclusive.\n");
+                return 1;
+            }
+            globalOptions.typeInfoLevel = level;
         }
         else if (strncmp(argv[i], "--target=", 9) == 0)
         {

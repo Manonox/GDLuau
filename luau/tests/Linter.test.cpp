@@ -7,6 +7,10 @@
 
 #include "doctest.h"
 
+LUAU_FASTFLAG(DebugLuauDeferredConstraintResolution);
+LUAU_FASTFLAG(LuauNativeAttribute);
+LUAU_FASTFLAG(LintRedundantNativeAttribute);
+
 using namespace Luau;
 
 TEST_SUITE_BEGIN("Linter");
@@ -18,7 +22,18 @@ function fib(n)
     return n < 2 and 1 or fib(n-1) + fib(n-2)
 end
 
-return math.max(fib(5), 1)
+)");
+
+    REQUIRE(0 == result.warnings.size());
+}
+
+TEST_CASE_FIXTURE(Fixture, "type_function_fully_reduces")
+{
+    LintResult result = lint(R"(
+function fib(n)
+    return n < 2 or  fib(n-2)
+end
+
 )");
 
     REQUIRE(0 == result.warnings.size());
@@ -1235,6 +1250,30 @@ _ = {
     CHECK_EQ(result.warnings[5].text, "Table index 1 is a duplicate; previously defined at line 36");
 }
 
+TEST_CASE_FIXTURE(Fixture, "read_write_table_props")
+{
+    ScopedFastFlag sff{FFlag::DebugLuauDeferredConstraintResolution, true};
+
+    LintResult result = lint(R"(-- line 1
+        type A = {x: number}
+        type B = {read x: number, write x: number}
+        type C = {x: number, read x: number} -- line 4
+        type D = {x: number, write x: number}
+        type E = {read x: number, x: boolean}
+        type F = {read x: number, read x: number}
+        type G = {write x: number, x: boolean}
+        type H = {write x: number, write x: boolean}
+    )");
+
+    REQUIRE(6 == result.warnings.size());
+    CHECK(result.warnings[0].text == "Table type field 'x' is already read-write; previously defined at line 4");
+    CHECK(result.warnings[1].text == "Table type field 'x' is already read-write; previously defined at line 5");
+    CHECK(result.warnings[2].text == "Table type field 'x' already has a read type defined at line 6");
+    CHECK(result.warnings[3].text == "Table type field 'x' is a duplicate; previously defined at line 7");
+    CHECK(result.warnings[4].text == "Table type field 'x' already has a write type defined at line 8");
+    CHECK(result.warnings[5].text == "Table type field 'x' is a duplicate; previously defined at line 9");
+}
+
 TEST_CASE_FIXTURE(Fixture, "ImportOnlyUsedInTypeAnnotation")
 {
     LintResult result = lint(R"(
@@ -1445,7 +1484,7 @@ TEST_CASE_FIXTURE(Fixture, "LintHygieneUAF")
 TEST_CASE_FIXTURE(BuiltinsFixture, "DeprecatedApiTyped")
 {
     unfreeze(frontend.globals.globalTypes);
-    TypeId instanceType = frontend.globals.globalTypes.addType(ClassType{"Instance", {}, std::nullopt, std::nullopt, {}, {}, "Test"});
+    TypeId instanceType = frontend.globals.globalTypes.addType(ClassType{"Instance", {}, std::nullopt, std::nullopt, {}, {}, "Test", {}});
     persist(instanceType);
     frontend.globals.globalScope->exportedTypeBindings["Instance"] = TypeFun{{}, instanceType};
 
@@ -1916,6 +1955,34 @@ local _ = a <= (b == 0)
     CHECK_EQ(result.warnings[2].text, "not X <= Y is equivalent to (not X) <= Y; add parentheses to silence");
     CHECK_EQ(result.warnings[3].text, "X <= Y == Z is equivalent to (X <= Y) == Z; add parentheses to silence");
     CHECK_EQ(result.warnings[4].text, "X <= Y <= Z is equivalent to (X <= Y) <= Z; did you mean X <= Y and Y <= Z?");
+}
+
+TEST_CASE_FIXTURE(Fixture, "RedundantNativeAttribute")
+{
+    ScopedFastFlag sff[] = {{FFlag::LuauNativeAttribute, true}, {FFlag::LintRedundantNativeAttribute, true}};
+
+    LintResult result = lint(R"(
+--!native
+
+@native
+local function f(a)
+    @native
+    local function g(b)
+        return (a + b)
+    end
+    return g
+end
+
+f(3)(4)
+)");
+
+    REQUIRE(2 == result.warnings.size());
+
+    CHECK_EQ(result.warnings[0].text, "native attribute on a function is redundant in a native module; consider removing it");
+    CHECK_EQ(result.warnings[0].location, Location(Position(3, 0), Position(3, 7)));
+
+    CHECK_EQ(result.warnings[1].text, "native attribute on a function is redundant in a native module; consider removing it");
+    CHECK_EQ(result.warnings[1].location, Location(Position(5, 4), Position(5, 11)));
 }
 
 TEST_SUITE_END();
