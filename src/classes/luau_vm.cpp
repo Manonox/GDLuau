@@ -182,7 +182,7 @@ int luaopen_base_luau(lua_State *L) {
 
 
 static const luaL_Reg lualibs[] = {
-    {"base", luaopen_base_luau},
+    {"", luaopen_base_luau},
     {LUA_COLIBNAME, luaopen_coroutine},
     {LUA_TABLIBNAME, luaopen_table},
     {LUA_OSLIBNAME, luaopen_os},
