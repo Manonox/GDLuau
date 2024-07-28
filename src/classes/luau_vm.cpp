@@ -182,7 +182,7 @@ int luaopen_base_luau(lua_State *L) {
 
 
 static const luaL_Reg lualibs[] = {
-    {"", luaopen_base_luau},
+    {"base", luaopen_base_luau},
     {LUA_COLIBNAME, luaopen_coroutine},
     {LUA_TABLIBNAME, luaopen_table},
     {LUA_OSLIBNAME, luaopen_os},
@@ -196,7 +196,7 @@ static const luaL_Reg lualibs[] = {
 };
 
 
-void LuauVM::open_libraries(const Array &libraries) {
+void LuauVM::open_libraries(const PackedStringArray &libraries) {
     const luaL_Reg* lib = lualibs;
     for (; lib->func; lib++)
     {

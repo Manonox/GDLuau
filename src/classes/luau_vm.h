@@ -41,7 +41,7 @@ public:
     int load_string(const String &code, const String &chunkname);
     int do_string(const String &code, const String &chunkname);
 
-    void open_libraries(const Array &libraries);
+    void open_libraries(const PackedStringArray &libraries);
     void open_all_libraries();
 
     int64_t get_memory_usage_bytes();
