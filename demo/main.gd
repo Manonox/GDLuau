@@ -10,16 +10,16 @@ func _ready():
 	
 	# You can also open libraries like this
 	#vm.open_libraries([
-		#vm.LUA_LIB_BASE,
-		#vm.LUA_LIB_COROUTINE,
-		#vm.LUA_LIB_TABLE,
-		#vm.LUA_LIB_OS,
-		#vm.LUA_LIB_STRING,
-		#vm.LUA_LIB_MATH,
-		#vm.LUA_LIB_VECTOR,
-		#vm.LUA_LIB_DEBUG,
-		#vm.LUA_LIB_UTF8,
-		#vm.LUA_LIB_BIT32
+		#vm.LUA_BASE_LIB,
+		#vm.LUA_COROUTINE_LIB,
+		#vm.LUA_TABLE_LIB,
+		#vm.LUA_OS_LIB,
+		#vm.LUA_STRING_LIB,
+		#vm.LUA_MATH_LIB,
+		#vm.LUA_VECTOR_LIB,
+		#vm.LUA_DEBUG_LIB,
+		#vm.LUA_UTF8_LIB,
+		#vm.LUA_BIT32_LIB
 	#])
 	
 	vm.lua_pushobject(self)
