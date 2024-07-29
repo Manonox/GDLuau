@@ -181,6 +181,7 @@ int luaopen_base_luau(lua_State *L) {
 }
 
 
+static const uint8_t lualibsLength = 10;
 static const luaL_Reg lualibs[] = {
     {"", luaopen_base_luau},
     {LUA_COLIBNAME, luaopen_coroutine},
@@ -192,28 +193,24 @@ static const luaL_Reg lualibs[] = {
     {LUA_DBLIBNAME, luaopen_debug},
     {LUA_UTF8LIBNAME, luaopen_utf8},
     {LUA_BITLIBNAME, luaopen_bit32},
-    {NULL, NULL},
 };
 
 
-void LuauVM::open_libraries(const PackedInt32Array &libraries) {
-    const luaL_Reg* lib = lualibs;
-    for (; lib->func; lib++)
-    {
-        if (!libraries.has(lib - lualibs))
+void LuauVM::open_libraries(const PackedByteArray &libraries) {
+    for (uint8_t i = 0; i < libraries.size(); ++i) {
+        uint8_t index = libraries[i];
+        if (index >= lualibsLength)
             continue;
-        lua_pushcfunction(L, lib->func, NULL);
-        lua_pushstring(lib->name);
+        lua_pushcfunction(L, lualibs[index].func, NULL);
+        lua_pushstring(lualibs[index].name);
         lua_call(1, 0);
     }
 }
 
 void LuauVM::open_all_libraries() {
-    const luaL_Reg* lib = lualibs;
-    for (; lib->func; lib++)
-    {
-        lua_pushcfunction(L, lib->func, NULL);
-        lua_pushstring(lib->name);
+    for (uint8_t i = 0; i < lualibsLength; ++i) {
+        lua_pushcfunction(L, lualibs[i].func, NULL);
+        lua_pushstring(lualibs[i].name);
         lua_call(1, 0);
     }
 }
