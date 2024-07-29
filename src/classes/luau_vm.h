@@ -11,16 +11,16 @@
 #include <chrono>
 
 enum lua_Lib {
-    LUA_LIB_BASE = 0,
-    LUA_LIB_COROUTINE,
-    LUA_LIB_TABLE,
-    LUA_LIB_OS,
-    LUA_LIB_STRING,
-    LUA_LIB_MATH,
-    LUA_LIB_VECTOR,
-    LUA_LIB_DEBUG,
-    LUA_LIB_UTF8,
-    LUA_LIB_BIT32
+    LUA_BASE_LIB = 0,
+    LUA_COROUTINE_LIB,
+    LUA_TABLE_LIB,
+    LUA_OS_LIB,
+    LUA_STRING_LIB,
+    LUA_MATH_LIB,
+    LUA_VECTOR_LIB,
+    LUA_DEBUG_LIB,
+    LUA_UTF8_LIB,
+    LUA_BIT32_LIB
 };
 
 
