@@ -8,6 +8,20 @@ func _ready():
 
 	vm.open_all_libraries()
 	
+	# You can also open libraries like this
+	#vm.open_libraries([
+		#vm.LUA_BASE_LIB,
+		#vm.LUA_COROUTINE_LIB,
+		#vm.LUA_TABLE_LIB,
+		#vm.LUA_OS_LIB,
+		#vm.LUA_STRING_LIB,
+		#vm.LUA_MATH_LIB,
+		#vm.LUA_VECTOR_LIB,
+		#vm.LUA_DEBUG_LIB,
+		#vm.LUA_UTF8_LIB,
+		#vm.LUA_BIT32_LIB
+	#])
+	
 	vm.lua_pushobject(self)
 	vm.lua_setfield(vm.LUA_GLOBALSINDEX, "node")
 
