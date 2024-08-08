@@ -133,7 +133,7 @@ library = env.SharedLibrary(
     source=sources,
 )
 
-copy = env.InstallAs("{}/addons/gdluau/bin/{}/lib{}".format(projectdir, env["platform"], file), library)
+copy = env.InstallAs("{}/addons/gdluau/bin/{}/{}".format(projectdir, env["platform"], file), library)
 
 default_args = [library, copy]
 if localEnv.get("compiledb", False):
