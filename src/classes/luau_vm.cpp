@@ -32,6 +32,9 @@ static lua_CompileOptions luau_vm_compile_options = {
     // int debugLevel;
     1,
 
+    // int typeInfoLevel;
+    0,
+
     // int coverageLevel;
     0,
 
