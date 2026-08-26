@@ -23,8 +23,8 @@ void lua_pushcallable(lua_State *L, const godot::Callable &callable, const godot
 
 bool luaL_hasmetatable(lua_State *L, int idx, const char *tname);
 
-void lua_pushobject(lua_State *L, godot::Object *object);
+void lua_pushgdobject(lua_State *L, godot::Object *object);
 void object_userdata_dtor(lua_State *L, void *data);
-godot::Object *lua_toobject(lua_State *L, int idx);
-int lua_isobject(lua_State *L, int idx);
-godot::Object *luaL_checkobject(lua_State *L, int idx, bool valid);
+godot::Object *lua_togdobject(lua_State *L, int idx);
+int lua_isgdobject(lua_State *L, int idx);
+godot::Object *luaL_checkgdobject(lua_State *L, int idx, bool valid);

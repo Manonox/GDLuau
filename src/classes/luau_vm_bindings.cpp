@@ -222,15 +222,15 @@ Error LuauVM::lua_pushcallable(const Callable &callable, const String &debugname
 }
 
 void LuauVM::lua_pushobject(Object *object) {
-    ::lua_pushobject(L, object);
+    lua_pushgdobject(L, object);
 }
 
 godot::Object *LuauVM::lua_toobject(int index) {
-    return ::lua_toobject(L, index);
+    return ::lua_togdobject(L, index);
 }
 
-bool LuauVM::lua_isobject(int index) {
-    return ::lua_isobject(L, index);
+bool (LuauVM::lua_isobject)(int index) {
+    return ::lua_isgdobject(L, index);
 }
 
 #pragma endregion
@@ -603,7 +603,7 @@ Vector3 LuauVM::luaL_checkvector(int narg) {
 #endif
 
 Object *LuauVM::luaL_checkobject(int narg, bool valid) {
-    return ::luaL_checkobject(L, narg, valid);
+    return ::luaL_checkgdobject(L, narg, valid);
 }
 
 void LuauVM::luaL_checktype(int narg, int type) {

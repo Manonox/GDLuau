@@ -1,6 +1,7 @@
 #include <utils.h>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/callable.hpp>
+#include <classes/luau_vm.h>
 #include <classes/luau_function.h>
 
 
@@ -64,7 +65,7 @@ void lua_pushvariant(lua_State *L, const godot::Variant &var) {
 
         case godot::Variant::Type::OBJECT: {
             godot::Object *o = var.operator godot::Object *();
-            lua_pushobject(L, o);
+            lua_pushgdobject(L, o);
             break;
         }
 
@@ -143,8 +144,8 @@ godot::Variant lua_tovariant(lua_State *L, int idx) {
         }
 
         case LUA_TUSERDATA: {
-            if (lua_isobject(L, idx)) {
-                return lua_toobject(L, idx);
+            if (lua_isgdobject(L, idx)) {
+                return lua_togdobject(L, idx);
             }
 
             return godot::Variant();
@@ -219,6 +220,7 @@ bool luaL_isarray(lua_State *L, int idx) {
 typedef struct CallableWrapped {
     int64_t object_id;
     const char32_t *method;
+    bool requires_node = false;
     char debugname[129];
 } CallableWrapped;
 
@@ -237,7 +239,12 @@ int lua_pushcallable_method(lua_State *L) {
         return 0;
     }
     
-    int nresults = object_p->callv(p_callablewrapped->method, godot::Array()); // Work-around, can't use 'call' for some reason
+    godot::Array args;
+    if (p_callablewrapped->requires_node) {
+        args.push_back(lua_getnode(L));
+    }
+
+    int nresults = object_p->callv(p_callablewrapped->method, args); // Work-around, can't use 'call' for some reason
     return nresults;
 }
 
@@ -257,6 +264,7 @@ void lua_pushcallable(lua_State *L, const godot::Callable &callable, const godot
     CallableWrapped *p_callablewrapped = (CallableWrapped *)lua_newuserdata(L, sizeof(CallableWrapped));
     p_callablewrapped->object_id = callable.get_object_id();
     p_callablewrapped->method = callable.get_method().c_escape().ptr();
+    p_callablewrapped->requires_node = callable.get_argument_count() - callable.get_bound_arguments_count() > 0;
 
     const int max_length = 129;
     auto length = debugname.ascii().length();
@@ -285,7 +293,7 @@ typedef struct ObjectWrapped {
     int64_t object_id;
 } ObjectWrapped;
 
-void lua_pushobject(lua_State *L, godot::Object *object) {
+void lua_pushgdobject(lua_State *L, godot::Object *object) {
     int tag = 0;
     if (object->is_class("RefCounted")) {
         godot::RefCounted *refcounted = reinterpret_cast<godot::RefCounted *>(object);
@@ -307,20 +315,20 @@ void object_userdata_dtor(lua_State *L, void *data) {
     refcounted->unreference();
 }
 
-godot::Object *lua_toobject(lua_State *L, int idx) {
+godot::Object *lua_togdobject(lua_State *L, int idx) {
     ObjectWrapped *p_nodewrapped = (ObjectWrapped *)lua_touserdata(L, idx);
     if (p_nodewrapped == NULL) return NULL; // Not userdata
     if (!luaL_hasmetatable(L, idx, "object")) return NULL; // Not "Object"
     return godot::ObjectDB::get_instance(p_nodewrapped->object_id);
 }
 
-int lua_isobject(lua_State *L, int idx) {
+int lua_isgdobject(lua_State *L, int idx) {
     if (!lua_isuserdata(L, idx)) return 0; // Not userdata
     if (!luaL_hasmetatable(L, idx, "object")) return 0; // Not "Object"
     return 1;
 }
 
-godot::Object *luaL_checkobject(lua_State *L, int idx, bool valid) {
+godot::Object *luaL_checkgdobject(lua_State *L, int idx, bool valid) {
     ObjectWrapped *p_nodewrapped = (ObjectWrapped *)luaL_checkudata(L, idx, "object");
     godot::Object *object = godot::ObjectDB::get_instance(p_nodewrapped->object_id);
     if (valid && object == NULL)

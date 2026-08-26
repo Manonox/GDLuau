@@ -59,7 +59,7 @@ public:
 
     void lua_pushobject(Object *node);
     Object *lua_toobject(int idx);
-    bool lua_isobject(int idx);
+    bool (lua_isobject)(int idx);
 
     #pragma endregion
 

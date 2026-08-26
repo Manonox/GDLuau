@@ -50,6 +50,9 @@ static lua_CompileOptions luau_vm_compile_options = {
 
     // int debugLevel;
     1,
+    
+    // int typeInfoLevel;
+    0,
 
     // int coverageLevel;
     0,
@@ -86,8 +89,8 @@ void LuauVM::_bind_methods() {
 }
 
 int metatable_object__eq(lua_State *L) {
-    Variant var1 = lua_toobject(L, 1);
-    Variant var2 = lua_toobject(L, 2);
+    Variant var1 = lua_togdobject(L, 1);
+    Variant var2 = lua_togdobject(L, 2);
     if (var1.get_type() != Variant::Type::OBJECT && var2.get_type() != Variant::Type::OBJECT) {
         ::lua_pushboolean(L, ::lua_equal(L, 1, 2));
         return 1;
