@@ -267,11 +267,13 @@ void LuauVM::lua_getfenv(int index) {
 }
 
 int LuauVM::lua_getfield(int index, const String &key) {
-    return ::lua_getfield(L, index, key.ascii().get_data());
+    auto s = key.utf8();
+    return ::lua_getfield(L, index, s.get_data());
 }
 
 void (LuauVM::lua_getglobal)(const String &key) {
-    ::lua_getfield(L, LUA_GLOBALSINDEX, key.ascii().get_data());
+    auto s = key.utf8();
+    ::lua_getfield(L, LUA_GLOBALSINDEX, s.get_data());
 }
 
 bool LuauVM::lua_getmetatable(int index) {
@@ -385,7 +387,8 @@ void LuauVM::lua_pushnumber(float x) {
 }
 
 void LuauVM::lua_pushstring(const String &s) {
-    ::lua_pushstring(L, s.ascii().get_data());
+    auto str = s.utf8();
+    ::lua_pushstring(L, str.get_data());
 }
 
 #if LUA_VECTOR_SIZE == 4
@@ -415,7 +418,8 @@ void LuauVM::lua_rawgeti(int index, int n) {
 }
 
 void LuauVM::lua_rawgetfield(int index, const String &key) {
-    ::lua_rawgetfield(L, index, key.ascii().get_data());
+    auto s = key.utf8();
+    ::lua_rawgetfield(L, index, s.get_data());
 }
 
 void LuauVM::lua_rawset(int index) {
@@ -427,7 +431,8 @@ void LuauVM::lua_rawseti(int index, int n) {
 }
 
 void LuauVM::lua_rawsetfield(int index, const String &key) {
-    ::lua_rawsetfield(L, index, key.ascii().get_data());
+    auto s = key.utf8();
+    ::lua_rawsetfield(L, index, s.get_data());
 }
 
 void LuauVM::lua_remove(int index) {
@@ -443,11 +448,13 @@ bool LuauVM::lua_setfenv(int index) {
 }
 
 void LuauVM::lua_setfield(int index, const String &key) {
-    ::lua_setfield(L, index, key.ascii().get_data());
+    auto s = key.utf8();
+    ::lua_setfield(L, index, s.get_data());
 }
 
 void (LuauVM::lua_setglobal)(const String &key) {
-    ::lua_setglobal(L, key.ascii().get_data());
+    auto s = key.utf8();
+    ::lua_setglobal(L, s.get_data());
 }
 
 bool LuauVM::lua_setmetatable(int index) {
@@ -537,27 +544,33 @@ int (LuauVM::lua_getref)(int ref) {
 
 
 bool LuauVM::luaL_hasmetatable(int index, const String &tname) {
-    return ::luaL_hasmetatable(L, index, tname.ascii().get_data());
+    auto s = tname.utf8();
+    return ::luaL_hasmetatable(L, index, s.get_data());
 }
 
 void (LuauVM::luaL_error)(const String &err) {
-    ::luaL_error(L, err.ascii().get_data());
+    auto s = err.utf8();
+    ::luaL_error(L, "%s", s.get_data());
 }
 
 bool LuauVM::luaL_callmeta(int obj, const String &field) {
-    return ::luaL_callmeta(L, obj, field.ascii().get_data());
+    auto s = field.utf8();
+    return ::luaL_callmeta(L, obj, s.get_data());
 }
 
 bool LuauVM::luaL_getmetafield(int obj, const String &field) {
-    return ::luaL_getmetafield(L, obj, field.ascii().get_data());
+    auto s = field.utf8();
+    return ::luaL_getmetafield(L, obj, s.get_data());
 }
 
 bool (LuauVM::luaL_getmetatable)(const String &tname) {
-    return ::lua_getfield(L, LUA_REGISTRYINDEX, tname.ascii().get_data());
+    auto s = tname.utf8();
+    return ::lua_getfield(L, LUA_REGISTRYINDEX, s.get_data());
 }
 
 bool LuauVM::luaL_newmetatable(const String &tname) {
-    return ::luaL_newmetatable(L, tname.ascii().get_data());
+    auto s = tname.utf8();
+    return ::luaL_newmetatable(L, s.get_data());
 }
 
 void LuauVM::luaL_where(int lvl) {
@@ -565,11 +578,13 @@ void LuauVM::luaL_where(int lvl) {
 }
 
 void LuauVM::luaL_typerror(int nargs, const String &tname) {
-    ::luaL_typeerror(L, nargs, tname.ascii().get_data());
+    auto s = tname.utf8();
+    ::luaL_typeerror(L, nargs, s.get_data());
 }
 
 void (LuauVM::luaL_argcheck)(bool cond, int narg, const String &msg) {
-    ((void)((cond) ? (void)0 : ::luaL_argerror(L, narg, msg.ascii().get_data())));
+    auto s = msg.utf8();
+    ((void)((cond) ? (void)0 : ::luaL_argerror(L, narg, s.get_data())));
 }
 
 
@@ -611,30 +626,37 @@ void LuauVM::luaL_checktype(int narg, int type) {
 }
 
 void LuauVM::luaL_checkstack(int sz, const String &messsage) {
-    ::luaL_checkstack(L, sz, messsage.ascii().get_data());
+    auto s = messsage.utf8();
+    ::luaL_checkstack(L, sz, s.get_data());
 }
 
 // luaL_checkudata
 
 int LuauVM::luaL_checkoption(int narg, const Array &array, const String &def) {
     auto size = array.size();
-    const char * * lst = (const char * *)memalloc(sizeof(const char *) * size);
+    auto lst = (const char * *)memalloc(sizeof(const char *) * size);
+    auto lst_s = new CharString[size];
     for (int64_t i = 0; i < size; i++) {
         Variant v = array[i];
         switch (v.get_type()) {
             case Variant::Type::STRING:
             case Variant::Type::STRING_NAME:
-                lst[i] = (v.operator godot::String()).ascii().get_data();
+                lst_s[i] = (v.operator godot::String()).utf8();
+                lst[i] = lst_s[i].get_data();
             default:
                 lst[i] = "";
         }
     }
     
     const char *def_p = NULL;
-    if (!def.is_empty())
-        def_p = def.ascii().get_data();
+    auto def_s = def.utf8();
+    if (!def_s.is_empty()) {
+        def_p = def_s.get_data();
+    }
+
     int result = ::luaL_checkoption(L, narg, def_p, lst);
     memfree(lst);
+    delete lst_s;
 
     return result;
 }
