@@ -169,7 +169,7 @@ public:
     #else
         Vector3 luaL_checkvector(int narg);
     #endif
-    Object *luaL_checkobject(int narg, bool valid);
+    Object *luaL_checkobject(int narg, const godot::String &type, bool check_valid);
     void luaL_checktype(int narg, int type);
     void luaL_checkstack(int sz, const String &messsage);
     int luaL_checkoption(int narg, const Array &array, const String &def);

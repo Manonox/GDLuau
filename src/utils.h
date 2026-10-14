@@ -27,4 +27,4 @@ void lua_pushgdobject(lua_State *L, godot::Object *object);
 void object_userdata_dtor(lua_State *L, void *data);
 godot::Object *lua_togdobject(lua_State *L, int idx);
 int lua_isgdobject(lua_State *L, int idx);
-godot::Object *luaL_checkgdobject(lua_State *L, int idx, bool valid);
+godot::Object *luaL_checkgdobject(lua_State *L, int idx, const char *type, bool valid);

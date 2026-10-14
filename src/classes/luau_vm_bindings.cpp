@@ -177,7 +177,7 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("luaL_checkstring", "narg"), &LuauVM::luaL_checkstring);
         ClassDB::bind_method(D_METHOD("luaL_checknumber", "narg"), &LuauVM::luaL_checknumber);
         ClassDB::bind_method(D_METHOD("luaL_checkvector", "narg"), &LuauVM::luaL_checkvector);
-        ClassDB::bind_method(D_METHOD("luaL_checkobject", "narg"), &LuauVM::luaL_checkobject);
+        ClassDB::bind_method(D_METHOD("luaL_checkobject", "narg", "metatable_name", "check_valid"), &LuauVM::luaL_checkobject, DEFVAL(true));
         ClassDB::bind_method(D_METHOD("luaL_checktype", "narg", "type"), &LuauVM::luaL_checktype);
         ClassDB::bind_method(D_METHOD("luaL_checkstack", "size", "message"), &LuauVM::luaL_checkstack);
         // ClassDB::bind_method(D_METHOD("luaL_checkudata", ""))
@@ -632,8 +632,9 @@ Vector3 LuauVM::luaL_checkvector(int narg) {
 }
 #endif
 
-Object *LuauVM::luaL_checkobject(int narg, bool valid) {
-    return ::luaL_checkgdobject(L, narg, valid);
+Object *LuauVM::luaL_checkobject(int narg, const godot::String &type, bool check_valid) {
+    auto type_s = type.utf8();
+    return ::luaL_checkgdobject(L, narg, type_s.get_data(), check_valid);
 }
 
 void LuauVM::luaL_checktype(int narg, int type) {

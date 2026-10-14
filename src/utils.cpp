@@ -289,16 +289,26 @@ bool luaL_hasmetatable(lua_State* L, int idx, const char* tname) {
 }
 
 
+enum ObjectTag : int {
+    Object,
+    RefCounted,
+};
+
 typedef struct ObjectWrapped {
     int64_t object_id;
 } ObjectWrapped;
 
 void lua_pushgdobject(lua_State *L, godot::Object *object) {
-    int tag = 0;
+    if (object == NULL) {
+        godot::print_error("trying to push `null` via lua_pushgdobject");
+        return;
+    }
+
+    int tag = ObjectTag::Object;
     if (object->is_class("RefCounted")) {
         godot::RefCounted *refcounted = reinterpret_cast<godot::RefCounted *>(object);
         refcounted->reference();
-        tag = 1;
+        tag = ObjectTag::RefCounted;
     }
     ObjectWrapped *p_nodewrapped = (ObjectWrapped *)lua_newuserdatatagged(L, sizeof(ObjectWrapped), tag);
     p_nodewrapped->object_id = object->get_instance_id();
@@ -315,25 +325,33 @@ void object_userdata_dtor(lua_State *L, void *data) {
     refcounted->unreference();
 }
 
-godot::Object *lua_togdobject(lua_State *L, int idx) {
-    ObjectWrapped *p_nodewrapped = (ObjectWrapped *)lua_touserdata(L, idx);
-    if (p_nodewrapped == NULL) return NULL; // Not userdata
-    if (!luaL_hasmetatable(L, idx, "object")) return NULL; // Not "Object"
-    return godot::ObjectDB::get_instance(p_nodewrapped->object_id);
-}
-
 int lua_isgdobject(lua_State *L, int idx) {
     if (!lua_isuserdata(L, idx)) return 0; // Not userdata
-    if (!luaL_hasmetatable(L, idx, "object")) return 0; // Not "Object"
+    auto tag = lua_userdatatag(L, idx);
+    if (!(tag == ObjectTag::Object || tag == ObjectTag::RefCounted)) {
+        return 0;
+    }
+    
     return 1;
 }
 
-godot::Object *luaL_checkgdobject(lua_State *L, int idx, bool valid) {
-    ObjectWrapped *p_nodewrapped = (ObjectWrapped *)luaL_checkudata(L, idx, "object");
-    godot::Object *object = godot::ObjectDB::get_instance(p_nodewrapped->object_id);
-    if (valid && object == NULL)
-        luaL_typeerrorL(L, idx, "object");
+godot::Object *lua_togdobject(lua_State *L, int idx) {
+    if (!lua_isgdobject(L, idx)) {
         return NULL;
+    }
+
+    ObjectWrapped *p_nodewrapped = (ObjectWrapped *)lua_touserdata(L, idx);
+    return godot::ObjectDB::get_instance(p_nodewrapped->object_id);
+}
+
+godot::Object *luaL_checkgdobject(lua_State *L, int idx, const char *type, bool valid) {
+    ObjectWrapped *p_nodewrapped = (ObjectWrapped *)luaL_checkudata(L, idx, type);
+    godot::Object *object = godot::ObjectDB::get_instance(p_nodewrapped->object_id);
+    if (valid && object == NULL) {
+        luaL_argerrorL(L, idx, "is invalid");
+        return NULL;
+    }
+
     return object;
 }
 
