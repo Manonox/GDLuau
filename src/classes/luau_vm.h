@@ -143,6 +143,8 @@ public:
     void lua_unref(int ref);
     int (lua_getref)(int ref);
 
+    void lua_setsafeenv(int index, bool enabled);
+
     #pragma endregion
 
     #pragma region Auxiliary
@@ -171,6 +173,8 @@ public:
     void luaL_checktype(int narg, int type);
     void luaL_checkstack(int sz, const String &messsage);
     int luaL_checkoption(int narg, const Array &array, const String &def);
+
+    void luaL_sandbox();
 
     #pragma endregion
 };

@@ -155,6 +155,8 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("luaL_ref", "index"), &LuauVM::lua_ref);
         ClassDB::bind_method(D_METHOD("luaL_unref", "ref"), &LuauVM::lua_unref);
         ClassDB::bind_method(D_METHOD("luaL_getref", "ref"), &LuauVM::lua_getref);
+
+        ClassDB::bind_method(D_METHOD("lua_setsafeenv", "index", "enabled"), &LuauVM::lua_setsafeenv);
     }
 
     // Auxiliary library
@@ -180,6 +182,8 @@ void LuauVM::_bind_passthrough_methods() {
         ClassDB::bind_method(D_METHOD("luaL_checkstack", "size", "message"), &LuauVM::luaL_checkstack);
         // ClassDB::bind_method(D_METHOD("luaL_checkudata", ""))
         ClassDB::bind_method(D_METHOD("luaL_checkoption", "narg", "array", "def"), &LuauVM::luaL_checkoption, DEFVAL(""));
+
+        ClassDB::bind_method(D_METHOD("luaL_sandbox"), &LuauVM::luaL_sandbox);
     }
 }
 
@@ -533,6 +537,10 @@ int (LuauVM::lua_getref)(int ref) {
     return ::lua_getref(L, ref);
 }
 
+void LuauVM::lua_setsafeenv(int index, bool enabled) {
+    ::lua_setsafeenv(L, index, enabled);
+}
+
 // lua_resume
 // lua_touserdata
 // lua_gethook
@@ -667,6 +675,11 @@ int LuauVM::luaL_checkoption(int narg, const Array &array, const String &def) {
 
     return result;
 }
+
+void LuauVM::luaL_sandbox() {
+    ::luaL_sandbox(L);
+}
+
 
 
 // luaL_optint
