@@ -14,10 +14,10 @@ For coding in lua/luau take a look at the ["Getting Started" section](https://lu
 Features
 --------
 - Full C/C++ API excluding userdata
-- Pushing/Pulling normal Callables (lambda Callables aren't supported)
+- Pushing/Pulling Callables
 - Pushing/Pulling Objects (Node / RefCounted) (as userdata)
 - Pushing/Pulling Godot Arrays and Dictionaries
-- Pushing/Pulling Godot Vector3s as Luau vectors
+- Pushing/Pulling Godot Vector3/Vector4's as Luau vectors
 - Custom print implementation that emits a signal
 - lua_loadstring, lua_dostring in GDScript (were "missing" in Luau)
 

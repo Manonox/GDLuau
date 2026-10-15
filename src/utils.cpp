@@ -217,65 +217,46 @@ bool luaL_isarray(lua_State *L, int idx) {
 }
 
 
-typedef struct CallableWrapped {
-    int64_t object_id;
-    const char32_t *method;
-    bool requires_node = false;
-    char debugname[129];
-} CallableWrapped;
-
 int lua_pushcallable_method(lua_State *L) {
-    CallableWrapped *p_callablewrapped = (CallableWrapped *)lua_touserdata(L, lua_upvalueindex(1));
+    godot::Callable *p_callable = (godot::Callable *)lua_touserdata(L, lua_upvalueindex(1));
     
-    if (!godot::UtilityFunctions::is_instance_id_valid(p_callablewrapped->object_id)) {
-        luaL_error(L, "attempt to call method on an invalid object");
+    if (!p_callable->is_valid()) {
+        godot::UtilityFunctions::push_error("[GDLUAU] Invalid callable called");
+        luaL_error(L, "invalid callable called");
         return 0;
     }
 
-    godot::Object *object_p = godot::ObjectDB::get_instance(p_callablewrapped->object_id);
-
-    if (!object_p->has_method(p_callablewrapped->method)) {
-        luaL_error(L, "attempt to call nonexistent external method");
-        return 0;
-    }
-    
     godot::Array args;
-    if (p_callablewrapped->requires_node) {
+    if (p_callable->get_argument_count() - p_callable->get_bound_arguments_count() > 0) {
         args.push_back(lua_getnode(L));
     }
 
-    int nresults = object_p->callv(p_callablewrapped->method, args); // Work-around, can't use 'call' for some reason
-    return nresults;
+    auto nresults = p_callable->callv(args);
+    if (nresults.get_type() != godot::Variant::Type::INT) {
+        godot::UtilityFunctions::push_error("[GDLUAU] Invalid callable ", p_callable->get_method(), " return type (should be int, got ", godot::Variant::get_type_name(nresults.get_type()), ")");
+        luaL_error(L, "invalid callable called");
+        return 0;
+    }
+    return int(nresults);
+}
+
+void callable_dtor(void *ud) {
+    godot::Callable *callable = static_cast<godot::Callable *>(ud);
+    callable->~Callable();
 }
 
 void lua_pushcallable(lua_State *L, const godot::Callable &callable, const godot::String &debugname) {
-    if (callable.is_custom()) {
-        godot::UtilityFunctions::push_warning("[GDLUAU] Custom Callables not implemented");
-        lua_pushnil(L);
+    if (!callable.is_valid()) {
+        godot::UtilityFunctions::push_error("[GDLUAU] Trying push invalid Callable");
+        lua_pushnil(L); // keeps the stack size consistent..?
         return;
     }
 
-    if (callable.is_null()) {
-        godot::UtilityFunctions::push_warning("[GDLUAU] Trying push invalid Callable");
-        lua_pushnil(L);
-        return;
-    }
-
-    CallableWrapped *p_callablewrapped = (CallableWrapped *)lua_newuserdata(L, sizeof(CallableWrapped));
-    p_callablewrapped->object_id = callable.get_object_id();
-    p_callablewrapped->method = callable.get_method().c_escape().ptr();
-    p_callablewrapped->requires_node = callable.get_argument_count() - callable.get_bound_arguments_count() > 0;
-
-    const int max_length = 129;
-    auto length = debugname.ascii().length();
-    length = length > max_length ? max_length : length;
-    auto src = debugname.to_ascii_buffer();
-    // const char *src = debugname.ascii().get_data();
-    for (int i = 0; i < length; i++)
-        p_callablewrapped->debugname[i] = src[i];
-    p_callablewrapped->debugname[length] = '\0';
-
-    lua_pushcclosure(L, lua_pushcallable_method, p_callablewrapped->debugname, 1);
+    godot::Callable *p_callable = (godot::Callable *)lua_newuserdatadtor(L, sizeof(godot::Callable), callable_dtor);
+    memnew_placement(p_callable, godot::Callable(callable));
+    
+    auto debugname_s = debugname.utf8();
+    lua_pushcclosure(L, lua_pushcallable_method, debugname_s.get_data(), 1);
 }
 
 

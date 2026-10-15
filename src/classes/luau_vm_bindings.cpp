@@ -219,8 +219,7 @@ Ref<LuauFunction> LuauVM::lua_tofunction(int index) {
 }
 
 Error LuauVM::lua_pushcallable(const Callable &callable, const String &debugname) {
-    ERR_FAIL_COND_V_MSG(callable.is_custom(), ERR_INVALID_PARAMETER, "Cannot push callable, lambda callables aren't supported.");
-    ERR_FAIL_COND_V_MSG(callable.is_null(), ERR_INVALID_PARAMETER, "Cannot push callable, the provided callable is invalid.");
+    ERR_FAIL_COND_V_MSG(!callable.is_valid(), ERR_INVALID_PARAMETER, "Cannot push callable, the provided callable is invalid.");
     ::lua_pushcallable(L, callable, debugname);
     return OK;
 }
